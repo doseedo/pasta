@@ -2553,3 +2553,4170 @@ PENNE:
 FARFALLE:
   Tactical: "Butterfly Drift" — Gain wings for 5s, able to glide and gain 
             height. Silent movement while active. 18
+
+PART 2:
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react"
+import { motion, AnimatePresence } from "framer-motion"
+import { addPropertyControls, ControlType } from "framer"
+
+// ============================================================
+// Doseedo DAW Demo Animation v2 — With Drag-to-Create
+// ============================================================
+
+const C = {
+    bgDarkest: "#0a0a0a",
+    bgDark: "#1a1a1a",
+    bgMid: "#1a1a2e",
+    bgLight: "#2a2a2a",
+    bgLighter: "#333",
+    border: "rgba(255,255,255,0.08)",
+    borderLight: "#333",
+    borderSubtle: "rgb(40,40,40)",
+    text: "#fff",
+    textSec: "#ccc",
+    textMuted: "#888",
+    textDim: "#555",
+    blue: "#667eea",
+    purple: "#8b5cf6",
+    purpleDark: "#764ba2",
+    green: "#4CAF50",
+    gradPrimary: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+    sidebarGrad: "linear-gradient(180deg, rgb(28,28,28), rgb(18,18,18))",
+} as const
+
+function seededRandom(seed: number) {
+    let s = seed
+    return () => {
+        s = (s * 16807 + 0) % 2147483647
+        return s / 2147483647
+    }
+}
+
+function WaveformSVG({
+    color,
+    seed,
+    width,
+    height,
+}: {
+    color: string
+    seed: number
+    width: number
+    height: number
+}) {
+    const pathD = useMemo(() => {
+        const rand = seededRandom(seed)
+        const mid = height / 2
+        const step = 3
+        const bars = Math.floor(width / step)
+        let d = ""
+        for (let i = 0; i < bars; i++) {
+            const x = i * step
+            const pos = i / bars
+            const envelope = Math.sin(pos * Math.PI) * 0.6 + 0.4
+            const burst = rand() > 0.85 ? 1.3 : 1
+            const amp = rand() * mid * 0.8 * envelope * burst
+            d += `M${x},${mid - amp} L${x},${mid + amp} `
+        }
+        return d
+    }, [color, seed, width, height])
+
+    return (
+        <svg
+            width={width}
+            height={height}
+            viewBox={`0 0 ${width} ${height}`}
+            style={{ display: "block" }}
+        >
+            <path
+                d={pathD}
+                stroke={color}
+                strokeWidth={2}
+                strokeLinecap="round"
+                fill="none"
+                opacity={0.8}
+                style={{ transition: "stroke 0.6s ease" }}
+            />
+        </svg>
+    )
+}
+
+function NoiseWaveform({
+    width,
+    height,
+    color = "rgba(139,92,246,0.6)",
+    settling = false,
+}: {
+    width: number
+    height: number
+    color?: string
+    settling?: boolean
+}) {
+    const canvasRef = useRef<HTMLCanvasElement | null>(null)
+    const animRef = useRef<number | null>(null)
+    const prevAmps = useRef<number[] | null>(null)
+    const settleStartRef = useRef(0)
+
+    useEffect(() => {
+        const canvas = canvasRef.current
+        if (!canvas || width <= 0 || height <= 0) return
+
+        const ctx = canvas.getContext("2d")
+        if (!ctx) return
+
+        const dpr = window.devicePixelRatio || 1
+        canvas.width = width * dpr
+        canvas.height = height * dpr
+        canvas.style.width = `${width}px`
+        canvas.style.height = `${height}px`
+        ctx.scale(dpr, dpr)
+
+        const lineCount = Math.floor(width / 4)
+        const centerY = height / 2
+
+        // Parse color for glow variant
+        const glowColor = color.replace(
+            /[\d.]+\)$/,
+            (m) => `${parseFloat(m) * 0.5})`
+        )
+
+        if (!prevAmps.current || prevAmps.current.length !== lineCount) {
+            prevAmps.current = new Array(lineCount)
+                .fill(0)
+                .map(() => (Math.random() - 0.5) * height * 0.3)
+        }
+
+        if (settling && settleStartRef.current === 0) {
+            settleStartRef.current = Date.now()
+        }
+
+        const animate = () => {
+            ctx.clearRect(0, 0, width, height)
+            ctx.strokeStyle = color
+            ctx.lineWidth = 2
+
+            const elapsed = settling
+                ? (Date.now() - settleStartRef.current) / 1000
+                : 0
+
+            for (let i = 0; i < lineCount; i++) {
+                const x = (i / lineCount) * width
+                const prev = prevAmps.current![i]
+
+                let amp: number
+
+                if (settling) {
+                    const progress = Math.min(elapsed / 0.5, 1)
+                    const ease = 1 - Math.pow(1 - progress, 3)
+                    const noise =
+                        (1 - ease) * ((Math.random() - 0.5) * height * 0.5)
+                    amp = noise
+                } else {
+                    const target = (Math.random() - 0.5) * height * 0.6
+                    amp = prev + (target - prev) * 0.08
+                }
+
+                prevAmps.current![i] = amp
+
+                ctx.beginPath()
+                ctx.moveTo(x, centerY - amp)
+                ctx.lineTo(x, centerY + amp)
+                ctx.stroke()
+
+                // Subtle glow on random bars
+                if (Math.random() > 0.95) {
+                    ctx.strokeStyle = glowColor
+                    ctx.lineWidth = 4
+                    ctx.beginPath()
+                    ctx.moveTo(x, centerY - amp)
+                    ctx.lineTo(x, centerY + amp)
+                    ctx.stroke()
+                    ctx.strokeStyle = color
+                    ctx.lineWidth = 2
+                }
+            }
+
+            if (!settling || elapsed < 0.5) {
+                animRef.current = requestAnimationFrame(animate)
+            }
+        }
+
+        animate()
+        return () => {
+            if (animRef.current) cancelAnimationFrame(animRef.current)
+        }
+    }, [width, height, color, settling])
+
+    return (
+        <canvas
+            ref={canvasRef}
+            style={{ width, height, borderRadius: 4, display: "block" }}
+        />
+    )
+}
+
+const Icons = {
+    play: (
+        <svg width="10" height="12" viewBox="0 0 10 12" fill="currentColor">
+            <polygon points="0,0 10,6 0,12" />
+        </svg>
+    ),
+    pause: (
+        <svg width="10" height="12" viewBox="0 0 10 12" fill="currentColor">
+            <rect x="0" y="0" width="3" height="12" rx="1" />
+            <rect x="7" y="0" width="3" height="12" rx="1" />
+        </svg>
+    ),
+    stop: (
+        <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor">
+            <rect x="0" y="0" width="10" height="10" rx="1" />
+        </svg>
+    ),
+    mic: (
+        <img
+            src="https://doseedo.com/assets/icons/microphone.png"
+            width="26"
+            height="26"
+            style={{ filter: "invert(1)", objectFit: "contain" }}
+            alt=""
+        />
+    ),
+    violin: (
+        <img
+            src="https://doseedo.com/assets/icons/violin.png"
+            width="26"
+            height="26"
+            style={{ filter: "invert(1)", objectFit: "contain" }}
+            alt=""
+        />
+    ),
+    keys: (
+        <img
+            src="https://doseedo.com/assets/icons/keyboard.png"
+            width="26"
+            height="26"
+            style={{ filter: "invert(1)", objectFit: "contain" }}
+            alt=""
+        />
+    ),
+    wind: (
+        <img
+            src="https://doseedo.com/assets/icons/sax.png"
+            width="26"
+            height="26"
+            style={{ filter: "invert(1)", objectFit: "contain" }}
+            alt=""
+        />
+    ),
+    home: (
+        <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+        >
+            <path d="M3 12l9-8 9 8" />
+            <path d="M5 10v10h14V10" />
+        </svg>
+    ),
+    search: (
+        <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+        >
+            <circle cx="11" cy="11" r="7" />
+            <line x1="16" y1="16" x2="21" y2="21" />
+        </svg>
+    ),
+    music: (
+        <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+        >
+            <circle cx="6" cy="18" r="3" />
+            <circle cx="18" cy="16" r="3" />
+            <line x1="9" y1="18" x2="9" y2="4" />
+            <line x1="21" y1="16" x2="21" y2="2" />
+            <path d="M9 4l12-2" />
+        </svg>
+    ),
+    settings: (
+        <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+        >
+            <circle cx="12" cy="12" r="3" />
+            <path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
+        </svg>
+    ),
+    wand: (
+        <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+        >
+            <path d="M15 4l5 5L7 22 2 17z" />
+            <path d="M18 2l4 4" />
+        </svg>
+    ),
+    chat: (
+        <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+        >
+            <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
+        </svg>
+    ),
+    chevDown: (
+        <svg width="8" height="8" viewBox="0 0 8 8">
+            <path
+                d="M1 2.5l3 3 3-3"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                fill="none"
+            />
+        </svg>
+    ),
+    piano: (
+        <img
+            src="https://doseedo.com/assets/icons/piano.png"
+            width="24"
+            height="24"
+            style={{ filter: "invert(1)", objectFit: "contain" }}
+            alt=""
+        />
+    ),
+    guitar: (
+        <img
+            src="https://doseedo.com/assets/icons/acguitar.png"
+            width="24"
+            height="24"
+            style={{ filter: "invert(1)", objectFit: "contain" }}
+            alt=""
+        />
+    ),
+    bass: (
+        <img
+            src="https://doseedo.com/assets/icons/elecbass.png"
+            width="24"
+            height="24"
+            style={{ filter: "invert(1)", objectFit: "contain" }}
+            alt=""
+        />
+    ),
+    trumpet: (
+        <img
+            src="https://doseedo.com/assets/icons/tpt.png"
+            width="28"
+            height="28"
+            style={{ filter: "invert(1)", objectFit: "contain" }}
+            alt=""
+        />
+    ),
+    drums: (
+        <img
+            src="https://doseedo.com/assets/icons/drumkit.png"
+            width="24"
+            height="24"
+            style={{ filter: "invert(1)", objectFit: "contain" }}
+            alt=""
+        />
+    ),
+    synth: (
+        <img
+            src="https://doseedo.com/assets/icons/keyboard.png"
+            width="24"
+            height="24"
+            style={{ filter: "invert(1)", objectFit: "contain" }}
+            alt=""
+        />
+    ),
+}
+
+// --- Instrument pool for drag-created tracks ---
+const instrumentPool = [
+    {
+        name: "Vocals",
+        icon: Icons.mic,
+        color: "rgba(168,127,255,0.7)",
+        colorBg: "rgba(168,127,255,0.06)",
+    },
+    {
+        name: "Strings",
+        icon: Icons.violin,
+        color: "rgba(102,126,234,0.7)",
+        colorBg: "rgba(102,126,234,0.06)",
+    },
+    {
+        name: "Piano",
+        icon: Icons.piano,
+        color: "rgba(72,202,228,0.7)",
+        colorBg: "rgba(72,202,228,0.06)",
+    },
+    {
+        name: "Winds",
+        icon: Icons.wind,
+        color: "rgba(100,220,150,0.7)",
+        colorBg: "rgba(100,220,150,0.06)",
+    },
+    {
+        name: "Drums",
+        icon: Icons.drums,
+        color: "rgba(255,165,0,0.7)",
+        colorBg: "rgba(255,165,0,0.06)",
+    },
+    {
+        name: "Bass",
+        icon: Icons.bass,
+        color: "rgba(255,100,100,0.7)",
+        colorBg: "rgba(255,100,100,0.06)",
+    },
+    {
+        name: "Synth",
+        icon: Icons.synth,
+        color: "rgba(200,100,255,0.7)",
+        colorBg: "rgba(200,100,255,0.06)",
+    },
+    {
+        name: "Guitar",
+        icon: Icons.guitar,
+        color: "rgba(255,200,50,0.7)",
+        colorBg: "rgba(255,200,50,0.06)",
+    },
+]
+
+// Instruments selectable in the generation panel
+const panelInstruments = [
+    { name: "Piano", icon: Icons.piano },
+    { name: "Guitar", icon: Icons.guitar },
+    { name: "Bass", icon: Icons.bass },
+    { name: "Strings", icon: Icons.violin },
+    { name: "Brass", icon: Icons.trumpet },
+    { name: "Winds", icon: Icons.wind },
+    { name: "Drums", icon: Icons.drums },
+    { name: "Synth", icon: Icons.synth },
+    { name: "Vocals", icon: Icons.mic },
+]
+
+// Track with position info
+interface TrackItem {
+    id: string
+    name: string
+    icon: React.ReactNode
+    color: string
+    colorBg: string
+    seed: number
+    startFrac: number // 0-1 position along timeline
+    widthFrac: number // 0-1 width along timeline
+    isPlaceholder: boolean
+    row: number // which row/slot
+    genreClip?: boolean // true for clips generated by genre switches
+    genreIndex?: number // which genre created this clip
+}
+
+const genres = [
+    {
+        name: "Normal",
+        bg: "linear-gradient(135deg, rgba(102,126,234,0.2), rgba(118,75,162,0.15))",
+        glow: "100,160,255",
+    },
+    {
+        name: "Jazz",
+        bg: "linear-gradient(135deg, rgba(140,80,220,0.2), rgba(100,50,180,0.15))",
+        glow: "120,60,200",
+    },
+    {
+        name: "Reggae",
+        bg: "linear-gradient(135deg, rgba(76,175,80,0.2), rgba(255,235,59,0.15))",
+        glow: "50,200,80",
+    },
+    {
+        name: "Electronic",
+        bg: "linear-gradient(135deg, rgba(0,188,212,0.2), rgba(156,39,176,0.15))",
+        glow: "30,60,180",
+    },
+]
+
+// Genre → which panelInstruments indices are active (6 per genre)
+// panelInstruments: 0=Piano, 1=Guitar, 2=Bass, 3=Strings, 4=Brass, 5=Winds, 6=Drums, 7=Synth, 8=Vocals
+const genreInstruments: Record<number, Set<number>> = {
+    0: new Set([0, 3, 4, 6, 7, 8]), // Normal: Piano, Strings, Brass, Drums, Synth, Vocals
+    1: new Set([0, 2, 4, 5, 6, 8]), // Jazz: Piano, Bass, Brass, Winds, Drums, Vocals
+    2: new Set([1, 2, 6, 0, 8, 5]), // Reggae: Guitar, Bass, Drums, Piano, Vocals, Winds
+    3: new Set([2, 6, 7, 0, 8, 1]), // Electronic: Bass, Drums, Synth, Piano, Vocals, Guitar
+}
+
+// ============================================================
+// MAIN COMPONENT
+// ============================================================
+export default function DAW2Animation({
+    trackDuration = 30,
+    width = 1200,
+    height = 640,
+    glowIntensity = 100,
+    panelWidth = 210,
+    videoExtendW = 0,
+    videoExtendH = 0,
+    swayIntensity = 6,
+    panelExtendH = 60,
+    bgVideoOpacity = 50,
+    bgVideoScale = 100,
+    style: frameStyle,
+}: {
+    trackDuration?: number
+    width?: number
+    height?: number
+    glowIntensity?: number
+    panelWidth?: number
+    videoExtendW?: number
+    videoExtendH?: number
+    swayIntensity?: number
+    panelExtendH?: number
+    bgVideoOpacity?: number
+    bgVideoScale?: number
+    style?: React.CSSProperties
+}) {
+    // --- State ---
+    const [isPlaying, setIsPlaying] = useState(false)
+    const [selectedGenre, setSelectedGenre] = useState(0)
+    const [activeTrackGenre, setActiveTrackGenre] = useState(0) // tracks which genre's clips are colored (fires 2s early)
+    const [selectedInstruments, setSelectedInstruments] = useState<Set<number>>(
+        new Set(genreInstruments[0])
+    )
+    const [genProgress, setGenProgress] = useState(0)
+    const [isGenerating, setIsGenerating] = useState(false)
+    const [tracks, setTracks] = useState<TrackItem[]>([])
+    const [mutedRows, setMutedRows] = useState<Set<number>>(new Set())
+    const [soloRow, setSoloRow] = useState<number | null>(null)
+    const [playheadProgress, setPlayheadProgress] = useState(0)
+    const [timeDisplay, setTimeDisplay] = useState("0:00")
+    const nextIdRef = useRef(1)
+
+    // Initial fade-in: hidden for 1s then 1s fade
+    const [bgReady, setBgReady] = useState(false)
+    useEffect(() => {
+        const t = setTimeout(() => setBgReady(true), 1000)
+        return () => clearTimeout(t)
+    }, [])
+
+    // Marquee drag state
+    const [videoLoaded, setVideoLoaded] = useState(false)
+    const videoRef = useRef<HTMLVideoElement | null>(null)
+    const bgVideoRef = useRef<HTMLVideoElement | null>(null)
+    const [bgVideoLoaded, setBgVideoLoaded] = useState(false)
+    const [isDragging, setIsDragging] = useState(false)
+    const [marqueeStart, setMarqueeStart] = useState({ x: 0, y: 0 })
+    const [marqueeEnd, setMarqueeEnd] = useState({ x: 0, y: 0 })
+    const dragRef = useRef({ active: false, startX: 0, startY: 0 })
+
+    const isPlayingRef = useRef(false)
+    const playheadRef = useRef<number | null>(null)
+    const startTimeRef = useRef(0)
+    const pausedAtRef = useRef(0)
+    const hasAutoPlayed = useRef(false)
+    const genIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+    const genTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+    const staggerTimeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([])
+    const rootRef = useRef<HTMLDivElement | null>(null)
+    const trackAreaRef = useRef<HTMLDivElement | null>(null)
+    const waveAreaRef = useRef<HTMLDivElement | null>(null)
+    const [rootW, setRootW] = useState(width)
+    const [rootH, setRootH] = useState(height)
+    const [measuredWaveW, setMeasuredWaveW] = useState(400)
+
+    // Measure actual root size + waveform area
+    useEffect(() => {
+        const measure = () => {
+            if (rootRef.current) {
+                const r = rootRef.current.getBoundingClientRect()
+                if (r.width > 0) setRootW(r.width)
+                if (r.height > 0) setRootH(r.height)
+            }
+            if (waveAreaRef.current) {
+                const w = waveAreaRef.current.offsetWidth
+                if (w > 0) setMeasuredWaveW(w)
+            }
+        }
+        measure()
+        const ro = new ResizeObserver(measure)
+        if (rootRef.current) ro.observe(rootRef.current)
+        if (waveAreaRef.current) ro.observe(waveAreaRef.current)
+        return () => ro.disconnect()
+    }, [])
+
+    // Layout
+    const labelW = 140
+    const genPanelW = panelWidth
+    const bodyH = rootH
+    const dawHeight = Math.max(200, bodyH * 0.48)
+    const vizHeight = bodyH - dawHeight
+    const trackHeight = 64
+    const timelineH = 28
+    const controlsH = 36
+
+    // --- Playhead ---
+    const playheadDuration = trackDuration
+
+    const animatePlayhead = useCallback(() => {
+        const elapsed =
+            pausedAtRef.current + (Date.now() - startTimeRef.current) / 1000
+        const progress = (elapsed % playheadDuration) / playheadDuration
+        setPlayheadProgress(progress)
+        const secs = Math.floor(elapsed % playheadDuration)
+        setTimeDisplay(
+            `${Math.floor(secs / 60)}:${(secs % 60).toString().padStart(2, "0")}`
+        )
+        playheadRef.current = requestAnimationFrame(animatePlayhead)
+    }, [playheadDuration])
+
+    // --- Auto-generate initial 4 tracks (full-width, stagger jump-in) ---
+    const autoGenerateTracks = useCallback(() => {
+        // Cancel any pending stagger timeouts from a previous call
+        staggerTimeoutsRef.current.forEach(clearTimeout)
+        staggerTimeoutsRef.current = []
+
+        const initialTracks: TrackItem[] = instrumentPool
+            .slice(0, 4)
+            .map((inst, i) => ({
+                id: `track-${nextIdRef.current++}`,
+                name: inst.name,
+                icon: inst.icon,
+                color: inst.color,
+                colorBg: inst.colorBg,
+                seed: Math.floor(Math.random() * 10000),
+                startFrac: 0,
+                widthFrac: 1,
+                isPlaceholder: false,
+                row: i,
+            }))
+
+        // Stagger: add tracks one at a time for the jump-in animation
+        initialTracks.forEach((t, i) => {
+            const tid = setTimeout(() => {
+                setTracks((curr) => [...curr, t])
+            }, i * 200)
+            staggerTimeoutsRef.current.push(tid)
+        })
+    }, [])
+
+    // --- Seek to a fraction (0-1) of the 30s loop ---
+    const seekTo = useCallback(
+        (frac: number) => {
+            const clampedFrac = Math.max(0, Math.min(1, frac))
+            const seekSeconds = clampedFrac * playheadDuration
+            const seekMs = clampedFrac * CYCLE_DURATION
+
+            // Update playhead
+            pausedAtRef.current = seekSeconds
+            startTimeRef.current = Date.now()
+            setPlayheadProgress(clampedFrac)
+            const secs = Math.floor(seekSeconds)
+            setTimeDisplay(
+                `${Math.floor(secs / 60)}:${(secs % 60).toString().padStart(2, "0")}`
+            )
+
+            // Update cycle position
+            cycleStartRef.current = Date.now() - seekMs
+            cyclePausedElapsedRef.current = seekMs
+
+            // Sync videos
+            const vid = videoRef.current
+            if (vid && videoLoaded) {
+                vid.currentTime =
+                    seekSeconds % (vid.duration || playheadDuration)
+            }
+            const bgVid = bgVideoRef.current
+            if (bgVid) {
+                bgVid.currentTime =
+                    seekSeconds % (bgVid.duration || playheadDuration)
+            }
+
+            // Update genre/header to match seek position immediately
+            const elapsed = seekMs % CYCLE_DURATION
+            if (elapsed < PAUSE_DURATION / 2) {
+                setCycleFade(elapsed / (PAUSE_DURATION / 2))
+            } else if (elapsed < PAUSE_DURATION) {
+                setCycleFade(1)
+            } else if (elapsed >= CYCLE_DURATION - PAUSE_DURATION / 2) {
+                const fadeOutElapsed =
+                    elapsed - (CYCLE_DURATION - PAUSE_DURATION / 2)
+                setCycleFade(1 - fadeOutElapsed / (PAUSE_DURATION / 2))
+            } else {
+                setCycleFade(1)
+            }
+
+            const contentElapsed = elapsed - PAUSE_DURATION
+            if (contentElapsed >= 0 && contentElapsed < CONTENT_DURATION) {
+                // Track generation + visual genre switch 2s early so they stay in sync
+                const GENRE_ANTICIPATION = 2000
+                const genreIdx = Math.min(
+                    genres.length - 1,
+                    Math.floor(
+                        (contentElapsed + GENRE_ANTICIPATION) / GENRE_DURATION
+                    )
+                )
+                if (genreIdx !== lastGenreRef.current) {
+                    lastGenreRef.current = genreIdx
+                    setSelectedGenre(genreIdx)
+                    setSelectedInstruments(
+                        new Set(
+                            genreInstruments[genreIdx] || genreInstruments[0]
+                        )
+                    )
+                }
+                if (genreIdx !== lastTrackGenreRef.current) {
+                    lastTrackGenreRef.current = genreIdx
+                    handleGenreClickRef.current(genreIdx)
+                }
+                const headerIdx =
+                    Math.floor(contentElapsed / HEADER_DURATION) %
+                    headerTexts.length
+                if (headerIdx !== headerIndexRef.current) {
+                    headerIndexRef.current = headerIdx
+                    setHeaderIndex(headerIdx)
+                }
+            }
+        },
+        [playheadDuration, videoLoaded]
+    )
+
+    // --- Playhead drag state ---
+    const seekDragRef = useRef(false)
+    const waveAreaRectRef = useRef<DOMRect | null>(null)
+
+    const handlePlay = useCallback(() => {
+        if (isPlaying) {
+            // --- PAUSE ---
+            if (playheadRef.current) cancelAnimationFrame(playheadRef.current)
+            pausedAtRef.current += (Date.now() - startTimeRef.current) / 1000
+            // Pause sequence cycle
+            cyclePausedElapsedRef.current =
+                (Date.now() - cycleStartRef.current) % CYCLE_DURATION
+            if (sequenceTimerRef.current) {
+                clearInterval(sequenceTimerRef.current)
+                sequenceTimerRef.current = null
+            }
+            // Pause videos
+            const vid = videoRef.current
+            if (vid) vid.pause()
+            const bgVid = bgVideoRef.current
+            if (bgVid) bgVid.pause()
+            isPlayingRef.current = false
+            setIsPlaying(false)
+        } else {
+            // --- PLAY / RESUME ---
+            if (tracks.length === 0) {
+                autoGenerateTracks()
+            }
+            // Resume sequence cycle from where we left off
+            cycleStartRef.current = Date.now() - cyclePausedElapsedRef.current
+            lastCycleCountRef.current = 0
+            sequenceTimerRef.current = setInterval(() => {
+                const rawElapsed = Date.now() - cycleStartRef.current
+                const cycleCount = Math.floor(rawElapsed / CYCLE_DURATION)
+                const elapsed = rawElapsed % CYCLE_DURATION
+
+                if (cycleCount > lastCycleCountRef.current) {
+                    lastCycleCountRef.current = cycleCount
+                    const vid = videoRef.current
+                    if (vid) {
+                        vid.currentTime = 0
+                        vid.play().catch(() => {})
+                    }
+                    const bgVid = bgVideoRef.current
+                    if (bgVid) {
+                        bgVid.currentTime = 0
+                        bgVid.play().catch(() => {})
+                    }
+                    pausedAtRef.current = 0
+                    startTimeRef.current = Date.now()
+                    headerIndexRef.current = -1
+                    setHeaderIndex(-1)
+                    lastGenreRef.current = 0
+                    lastTrackGenreRef.current = 0
+                    setSelectedGenre(0)
+                    setActiveTrackGenre(0)
+                    setSelectedInstruments(new Set(genreInstruments[0]))
+                    setTracks([])
+                    setIsGenerating(false)
+                    setTimeout(() => autoGenerateTracksRef.current(), 50)
+                }
+
+                if (elapsed < PAUSE_DURATION / 2) {
+                    setCycleFade(elapsed / (PAUSE_DURATION / 2))
+                } else if (elapsed < PAUSE_DURATION) {
+                    setCycleFade(1)
+                } else if (elapsed >= CYCLE_DURATION - PAUSE_DURATION / 2) {
+                    const fadeOutElapsed =
+                        elapsed - (CYCLE_DURATION - PAUSE_DURATION / 2)
+                    setCycleFade(1 - fadeOutElapsed / (PAUSE_DURATION / 2))
+                } else {
+                    setCycleFade(1)
+                }
+
+                const contentElapsed = elapsed - PAUSE_DURATION
+                if (contentElapsed >= 0 && contentElapsed < CONTENT_DURATION) {
+                    const GENRE_ANTICIPATION = 2000
+                    const genreIdx = Math.min(
+                        genres.length - 1,
+                        Math.floor(
+                            (contentElapsed + GENRE_ANTICIPATION) /
+                                GENRE_DURATION
+                        )
+                    )
+                    if (genreIdx !== lastGenreRef.current) {
+                        lastGenreRef.current = genreIdx
+                        setSelectedGenre(genreIdx)
+                        setSelectedInstruments(
+                            new Set(
+                                genreInstruments[genreIdx] ||
+                                    genreInstruments[0]
+                            )
+                        )
+                    }
+                    if (genreIdx !== lastTrackGenreRef.current) {
+                        lastTrackGenreRef.current = genreIdx
+                        handleGenreClickRef.current(genreIdx)
+                    }
+                    const headerIdx =
+                        Math.floor(contentElapsed / HEADER_DURATION) %
+                        headerTexts.length
+                    if (headerIdx !== headerIndexRef.current) {
+                        headerIndexRef.current = headerIdx
+                        setHeaderIndex(headerIdx)
+                    }
+                }
+            }, 50)
+            // Resume videos
+            const vid = videoRef.current
+            if (vid && videoLoaded) vid.play().catch(() => {})
+            const bgVid = bgVideoRef.current
+            if (bgVid) bgVid.play().catch(() => {})
+            startTimeRef.current = Date.now()
+            isPlayingRef.current = true
+            setIsPlaying(true)
+            playheadRef.current = requestAnimationFrame(animatePlayhead)
+        }
+    }, [
+        isPlaying,
+        animatePlayhead,
+        tracks.length,
+        autoGenerateTracks,
+        videoLoaded,
+    ])
+
+    // Auto-play is handled by startSequence → restartCycle on mount
+
+    // --- Video: detect when ready, retry on 500 cold-start errors ---
+    const VIDEO_URL =
+        "https://storage.googleapis.com/audiocraft-411005.appspot.com/assets/sitedemo.mp4"
+    const videoRetryRef = useRef(0)
+    useEffect(() => {
+        const vid = videoRef.current
+        if (!vid) return
+        let retryTimer: ReturnType<typeof setTimeout> | null = null
+        const onReady = () => {
+            videoRetryRef.current = 0
+            setVideoLoaded(true)
+        }
+        const onError = () => {
+            // Retry up to 5 times with increasing delay (2s, 3s, 4s, 5s, 6s)
+            if (videoRetryRef.current < 5) {
+                videoRetryRef.current++
+                const delay = 1000 + videoRetryRef.current * 1000
+                retryTimer = setTimeout(() => {
+                    vid.src = VIDEO_URL + "?r=" + videoRetryRef.current
+                    vid.load()
+                }, delay)
+            }
+        }
+        vid.addEventListener("canplay", onReady)
+        vid.addEventListener("loadeddata", onReady)
+        vid.addEventListener("error", onError)
+        if (vid.readyState >= 2) onReady()
+        return () => {
+            vid.removeEventListener("canplay", onReady)
+            vid.removeEventListener("loadeddata", onReady)
+            vid.removeEventListener("error", onError)
+            if (retryTimer) clearTimeout(retryTimer)
+        }
+    }, [])
+
+    // --- Video auto-play when loaded ---
+    useEffect(() => {
+        const vid = videoRef.current
+        if (!vid || !videoLoaded) return
+        vid.play().catch(() => {})
+    }, [videoLoaded])
+
+    // --- Genre click → split tracks and generate colored clip at genre time slot ---
+    const greyColor = "rgba(100,100,100,0.5)"
+    const greyColorBg = "rgba(100,100,100,0.04)"
+
+    const handleGenreClick = useCallback(
+        (genreIndex: number) => {
+            if (isGenerating) return
+
+            // Genre 0: tracks already loaded by autoGenerateTracks, nothing to do
+            if (genreIndex === 0) {
+                setActiveTrackGenre(0)
+                return
+            }
+
+            // Genres 1-3: split existing tracks and insert colored clip at the genre's time slot
+            const startFrac =
+                (PAUSE_DURATION + genreIndex * GENRE_DURATION) / CYCLE_DURATION
+            const endFrac = Math.min(
+                1,
+                (PAUSE_DURATION + (genreIndex + 1) * GENRE_DURATION) /
+                    CYCLE_DURATION
+            )
+
+            const survivingTracks: TrackItem[] = []
+            const affectedRows = new Set<number>()
+
+            tracks.forEach((t) => {
+                const tEnd = t.startFrac + t.widthFrac
+
+                // No overlap with the new clip region — keep as-is (renderer handles coloring)
+                if (tEnd <= startFrac || t.startFrac >= endFrac) {
+                    survivingTracks.push(t)
+                    return
+                }
+
+                affectedRows.add(t.row)
+
+                // Before portion — inherit parent's genreIndex (stays grey if parent was grey),
+                // falls back to activeTrackGenre for original unsplit tracks
+                if (t.startFrac < startFrac) {
+                    survivingTracks.push({
+                        ...t,
+                        id: `track-${nextIdRef.current++}`,
+                        widthFrac: startFrac - t.startFrac,
+                        isPlaceholder: false,
+                        genreClip: true,
+                        genreIndex: t.genreIndex ?? activeTrackGenre,
+                    })
+                }
+
+                // After portion — same logic
+                if (tEnd > endFrac) {
+                    survivingTracks.push({
+                        ...t,
+                        id: `track-${nextIdRef.current++}`,
+                        startFrac: endFrac,
+                        widthFrac: tEnd - endFrac,
+                        seed: t.seed + 500,
+                        isPlaceholder: false,
+                        genreClip: true,
+                        genreIndex: t.genreIndex ?? activeTrackGenre,
+                    })
+                }
+            })
+
+            // Create new colored clips at the genre position
+            const rows = Array.from(affectedRows).sort((a, b) => a - b)
+            const targetRows = rows.length > 0 ? rows : [0, 1, 2, 3]
+
+            const newTracks: TrackItem[] = targetRows.map((row, i) => {
+                const instIndex =
+                    (nextIdRef.current + i) % instrumentPool.length
+                const inst = instrumentPool[instIndex]
+                return {
+                    id: `track-${nextIdRef.current++}`,
+                    name: inst.name,
+                    icon: inst.icon,
+                    color: inst.color,
+                    colorBg: inst.colorBg,
+                    seed: Math.floor(Math.random() * 10000),
+                    startFrac,
+                    widthFrac: endFrac - startFrac,
+                    isPlaceholder: true,
+                    row,
+                    genreClip: true,
+                    genreIndex: genreIndex,
+                }
+            })
+
+            setTracks([...survivingTracks, ...newTracks])
+            setIsGenerating(true)
+            setGenProgress(0)
+
+            let p = 0
+            genIntervalRef.current = setInterval(() => {
+                p += 0.025
+                if (p >= 1) {
+                    if (genIntervalRef.current)
+                        clearInterval(genIntervalRef.current)
+                    setGenProgress(1)
+                } else {
+                    setGenProgress(p)
+                }
+            }, 30)
+
+            genTimeoutRef.current = setTimeout(() => {
+                setIsGenerating(false)
+                setActiveTrackGenre(genreIndex)
+                newTracks.forEach((t, i) => {
+                    setTimeout(() => {
+                        setTracks((curr) =>
+                            curr.map((c) =>
+                                c.id === t.id
+                                    ? { ...c, isPlaceholder: false }
+                                    : c
+                            )
+                        )
+                    }, i * 200)
+                })
+            }, 1500)
+        },
+        [isGenerating, tracks, activeTrackGenre]
+    )
+
+    // --- Cycling header texts (2.5s each, 2 per genre color = synced with 5s genre rotation) ---
+    const headerTexts = [
+        "Deconstruct",
+        "Generate",
+        "All From One Audio File",
+        "Real Time Control",
+        "Experiment",
+        "Any Genre",
+        "Unlimited Possibility",
+        "Complete Control",
+    ]
+    const [headerIndex, setHeaderIndex] = useState(-1)
+    const [cycleFade, setCycleFade] = useState(0) // start faded out
+
+    // --- Master sequence: 30s total ---
+    // 2s pause (fade in) at start, then 4 genres × 7s = 28s content, fade out at end
+    const GENRE_DURATION = 7000
+    const HEADER_DURATION = 3500 // 2 headers per genre
+    const CONTENT_DURATION = 28000 // 4 genres × 7s
+    const PAUSE_DURATION = 2000
+    const CYCLE_DURATION = 30000
+
+    const sequenceTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+    const cycleStartRef = useRef(Date.now())
+    const cyclePausedElapsedRef = useRef(0) // how far into cycle when paused
+    const handleGenreClickRef = useRef(handleGenreClick)
+    handleGenreClickRef.current = handleGenreClick
+    const selectedGenreRef = useRef(selectedGenre)
+    selectedGenreRef.current = selectedGenre
+    const headerIndexRef = useRef(0)
+    const lastGenreRef = useRef(0)
+    const lastTrackGenreRef = useRef(0)
+
+    const autoGenerateTracksRef = useRef(autoGenerateTracks)
+    autoGenerateTracksRef.current = autoGenerateTracks
+
+    const restartCycle = useCallback(() => {
+        cycleStartRef.current = Date.now()
+        headerIndexRef.current = -1
+        setHeaderIndex(-1)
+        lastGenreRef.current = 0
+        lastTrackGenreRef.current = 0
+        setSelectedGenre(0)
+        setActiveTrackGenre(0)
+        setSelectedInstruments(new Set(genreInstruments[0]))
+        // Clear tracks then re-do the stagger drop-in animation
+        setTracks([])
+        setIsGenerating(false)
+        setTimeout(() => autoGenerateTracksRef.current(), 50)
+        setCycleFade(0) // start faded, will fade in during first 1s
+        // Restart videos from beginning
+        const vid = videoRef.current
+        if (vid && videoLoaded) {
+            vid.currentTime = 0
+            vid.play().catch(() => {})
+        }
+        const bgVid = bgVideoRef.current
+        if (bgVid) {
+            bgVid.currentTime = 0
+            bgVid.play().catch(() => {})
+        }
+        // Reset playhead and start animating immediately
+        pausedAtRef.current = 0
+        startTimeRef.current = Date.now()
+        setPlayheadProgress(0)
+        setTimeDisplay("0:00")
+        isPlayingRef.current = true
+        setIsPlaying(true)
+        if (playheadRef.current) cancelAnimationFrame(playheadRef.current)
+        const startAnim = () => {
+            const el =
+                pausedAtRef.current + (Date.now() - startTimeRef.current) / 1000
+            const prog = (el % playheadDuration) / playheadDuration
+            setPlayheadProgress(prog)
+            const s = Math.floor(el % playheadDuration)
+            setTimeDisplay(
+                `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, "0")}`
+            )
+            playheadRef.current = requestAnimationFrame(startAnim)
+        }
+        playheadRef.current = requestAnimationFrame(startAnim)
+    }, [videoLoaded, playheadDuration])
+
+    const lastCycleCountRef = useRef(0)
+
+    const startSequence = useCallback(() => {
+        if (sequenceTimerRef.current) clearInterval(sequenceTimerRef.current)
+
+        restartCycle()
+        lastCycleCountRef.current = 0
+
+        sequenceTimerRef.current = setInterval(() => {
+            const rawElapsed = Date.now() - cycleStartRef.current
+            const cycleCount = Math.floor(rawElapsed / CYCLE_DURATION)
+            const elapsed = rawElapsed % CYCLE_DURATION
+
+            // Seamless loop: when cycle wraps, reset tracks/video/playhead
+            if (cycleCount > lastCycleCountRef.current) {
+                lastCycleCountRef.current = cycleCount
+                // Reset videos to start
+                const vid = videoRef.current
+                if (vid) {
+                    vid.currentTime = 0
+                    vid.play().catch(() => {})
+                }
+                const bgVid2 = bgVideoRef.current
+                if (bgVid2) {
+                    bgVid2.currentTime = 0
+                    bgVid2.play().catch(() => {})
+                }
+                // Reset playhead
+                pausedAtRef.current = 0
+                startTimeRef.current = Date.now()
+                // Reset tracks with stagger animation
+                headerIndexRef.current = -1
+                setHeaderIndex(-1)
+                lastGenreRef.current = 0
+                lastTrackGenreRef.current = 0
+                setSelectedGenre(0)
+                setActiveTrackGenre(0)
+                setSelectedInstruments(new Set(genreInstruments[0]))
+                setTracks([])
+                setIsGenerating(false)
+                setTimeout(() => autoGenerateTracksRef.current(), 50)
+            }
+
+            if (elapsed < PAUSE_DURATION / 2) {
+                // First 1s: fade in
+                setCycleFade(elapsed / (PAUSE_DURATION / 2))
+            } else if (elapsed < PAUSE_DURATION) {
+                setCycleFade(1)
+            } else if (elapsed >= CYCLE_DURATION - PAUSE_DURATION / 2) {
+                // Last 1s: fade out
+                const fadeOutElapsed =
+                    elapsed - (CYCLE_DURATION - PAUSE_DURATION / 2)
+                setCycleFade(1 - fadeOutElapsed / (PAUSE_DURATION / 2))
+            } else {
+                setCycleFade(1)
+            }
+
+            // Content phase starts after the fade-in
+            const contentElapsed = elapsed - PAUSE_DURATION
+            if (contentElapsed >= 0 && contentElapsed < CONTENT_DURATION) {
+                const GENRE_ANTICIPATION = 2000
+                const genreIdx = Math.min(
+                    genres.length - 1,
+                    Math.floor(
+                        (contentElapsed + GENRE_ANTICIPATION) / GENRE_DURATION
+                    )
+                )
+                if (genreIdx !== lastGenreRef.current) {
+                    lastGenreRef.current = genreIdx
+                    setSelectedGenre(genreIdx)
+                    setSelectedInstruments(
+                        new Set(
+                            genreInstruments[genreIdx] || genreInstruments[0]
+                        )
+                    )
+                }
+                if (genreIdx !== lastTrackGenreRef.current) {
+                    lastTrackGenreRef.current = genreIdx
+                    handleGenreClickRef.current(genreIdx)
+                }
+                // Header: changes every 3.5s
+                const headerIdx =
+                    Math.floor(contentElapsed / HEADER_DURATION) %
+                    headerTexts.length
+                if (headerIdx !== headerIndexRef.current) {
+                    headerIndexRef.current = headerIdx
+                    setHeaderIndex(headerIdx)
+                }
+            }
+        }, 50)
+    }, [restartCycle])
+
+    useEffect(() => {
+        startSequence()
+
+        // Re-sync loop when returning to the tab — browsers pause video
+        // while the tab is hidden but Date.now() keeps ticking, breaking sync.
+        const onVisibility = () => {
+            if (
+                document.visibilityState === "visible" &&
+                isPlayingRef.current
+            ) {
+                restartCycle()
+            }
+        }
+        document.addEventListener("visibilitychange", onVisibility)
+
+        return () => {
+            if (sequenceTimerRef.current)
+                clearInterval(sequenceTimerRef.current)
+            document.removeEventListener("visibilitychange", onVisibility)
+        }
+    }, [startSequence, restartCycle])
+
+    const navigateGenre = useCallback(
+        (dir: 1 | -1) => {
+            if (isGenerating) return
+            const next = (selectedGenre + dir + genres.length) % genres.length
+            setSelectedGenre(next)
+            setSelectedInstruments(
+                new Set(genreInstruments[next] || genreInstruments[0])
+            )
+            handleGenreClick(next)
+            // Reset cycle from current position
+            cycleStartRef.current =
+                Date.now() - (PAUSE_DURATION + next * GENRE_DURATION)
+            lastGenreRef.current = next
+            lastTrackGenreRef.current = next
+            headerIndexRef.current = next * 2
+            setHeaderIndex(next * 2)
+        },
+        [isGenerating, selectedGenre, handleGenreClick]
+    )
+
+    // --- Marquee drag handlers ---
+    const handleTrackAreaMouseDown = useCallback((e: React.MouseEvent) => {
+        if (e.button !== 0) return
+        // Allow drag on tracks AND empty space — drag replaces/splits existing clips
+        const target = e.target as HTMLElement
+        if (target.closest("button")) return // don't interfere with buttons
+
+        const container = trackAreaRef.current
+        if (!container) return
+
+        const rect = container.getBoundingClientRect()
+        const x = e.clientX - rect.left
+        const y = e.clientY - rect.top
+
+        dragRef.current = { active: true, startX: x, startY: y }
+        setMarqueeStart({ x, y })
+        setMarqueeEnd({ x, y })
+        setIsDragging(true)
+        e.preventDefault()
+    }, [])
+
+    useEffect(() => {
+        const handleMouseMove = (e: MouseEvent) => {
+            // Playhead scrubbing
+            if (seekDragRef.current && waveAreaRectRef.current) {
+                const rect = waveAreaRectRef.current
+                const frac = (e.clientX - rect.left) / rect.width
+                seekTo(Math.max(0, Math.min(1, frac)))
+                return
+            }
+            if (!dragRef.current.active) return
+            const container = trackAreaRef.current
+            if (!container) return
+            const rect = container.getBoundingClientRect()
+            const x = Math.max(
+                0,
+                Math.min(e.clientX - rect.left, container.offsetWidth)
+            )
+            const y = Math.max(
+                0,
+                Math.min(e.clientY - rect.top, container.offsetHeight)
+            )
+            setMarqueeEnd({ x, y })
+        }
+
+        const handleMouseUp = (e: MouseEvent) => {
+            if (seekDragRef.current) {
+                seekDragRef.current = false
+                waveAreaRectRef.current = null
+                return
+            }
+            if (!dragRef.current.active) return
+            dragRef.current.active = false
+            setIsDragging(false)
+
+            const container = trackAreaRef.current
+            if (!container) return
+            const rect = container.getBoundingClientRect()
+            const endX = Math.max(
+                0,
+                Math.min(e.clientX - rect.left, container.offsetWidth)
+            )
+            const endY = Math.max(
+                0,
+                Math.min(e.clientY - rect.top, container.offsetHeight)
+            )
+
+            const sx = dragRef.current.startX
+            const sy = dragRef.current.startY
+
+            // Selection box (in container coordinates)
+            const left = Math.min(sx, endX)
+            const top = Math.min(sy, endY)
+            const w = Math.abs(endX - sx)
+            const h = Math.abs(endY - sy)
+
+            // Minimum drag size to avoid accidental clicks
+            if (w < 10 || h < 10) return
+
+            // Convert pixel position to timeline fractions
+            // Track area: labelW is the label column, rest is waveform area
+            const waveLeft = Math.max(0, left - labelW)
+            const waveRight = Math.max(0, left + w - labelW)
+            const startFrac = Math.max(0, Math.min(1, waveLeft / measuredWaveW))
+            const endFrac = Math.max(0, Math.min(1, waveRight / measuredWaveW))
+            const widthFrac = endFrac - startFrac
+
+            if (widthFrac < 0.01) return
+
+            // Determine which rows the drag covers based on midpoint crossing
+            // A row is included if the selection box crosses its vertical midpoint
+            const bottom = top + h
+            const maxRow = Math.floor(bottom / trackHeight) + 1
+            const affectedRows = new Set<number>()
+            for (let r = 0; r <= maxRow; r++) {
+                const rowMid = r * trackHeight + trackHeight / 2
+                if (top < rowMid && bottom > rowMid) affectedRows.add(r)
+            }
+            if (affectedRows.size === 0) return
+            const startRow = Math.min(...affectedRows)
+            const numTracks = affectedRows.size
+
+            const survivingTracks: TrackItem[] = []
+            const splitTracks: TrackItem[] = []
+
+            tracks.forEach((t) => {
+                if (!affectedRows.has(t.row)) {
+                    // Not in an affected row — keep as-is
+                    survivingTracks.push(t)
+                    return
+                }
+                const tEnd = t.startFrac + t.widthFrac
+                // No overlap — keep as-is
+                if (tEnd <= startFrac || t.startFrac >= endFrac) {
+                    survivingTracks.push(t)
+                    return
+                }
+                // Overlap — split into before & after portions
+                // Before portion
+                if (t.startFrac < startFrac) {
+                    splitTracks.push({
+                        ...t,
+                        id: `track-${nextIdRef.current++}`,
+                        widthFrac: startFrac - t.startFrac,
+                        isPlaceholder: false,
+                    })
+                }
+                // After portion
+                if (tEnd > endFrac) {
+                    splitTracks.push({
+                        ...t,
+                        id: `track-${nextIdRef.current++}`,
+                        startFrac: endFrac,
+                        widthFrac: tEnd - endFrac,
+                        seed: t.seed + 500, // different waveform for the split
+                        isPlaceholder: false,
+                    })
+                }
+                // The overlapping portion is replaced by the new drag tracks
+            })
+
+            // Create new placeholder tracks at the drag position
+            const newTracks: TrackItem[] = []
+            for (let i = 0; i < numTracks; i++) {
+                const instIndex =
+                    (nextIdRef.current + i) % instrumentPool.length
+                const inst = instrumentPool[instIndex]
+                newTracks.push({
+                    id: `track-${nextIdRef.current++}`,
+                    name: inst.name,
+                    icon: inst.icon,
+                    color: inst.color,
+                    colorBg: inst.colorBg,
+                    seed: Math.floor(Math.random() * 10000),
+                    startFrac,
+                    widthFrac,
+                    isPlaceholder: true,
+                    row: startRow + i,
+                })
+            }
+
+            setTracks([...survivingTracks, ...splitTracks, ...newTracks])
+            setIsGenerating(true)
+            setGenProgress(0)
+
+            // Animate progress
+            let p = 0
+            genIntervalRef.current = setInterval(() => {
+                p += 0.025
+                if (p >= 1) {
+                    if (genIntervalRef.current)
+                        clearInterval(genIntervalRef.current)
+                    setGenProgress(1)
+                } else {
+                    setGenProgress(p)
+                }
+            }, 30)
+
+            // Stagger-reveal new tracks
+            genTimeoutRef.current = setTimeout(() => {
+                setIsGenerating(false)
+                newTracks.forEach((t, i) => {
+                    setTimeout(() => {
+                        setTracks((curr) =>
+                            curr.map((c) =>
+                                c.id === t.id
+                                    ? { ...c, isPlaceholder: false }
+                                    : c
+                            )
+                        )
+                    }, i * 200)
+                })
+            }, 1500)
+        }
+
+        window.addEventListener("mousemove", handleMouseMove)
+        window.addEventListener("mouseup", handleMouseUp)
+        return () => {
+            window.removeEventListener("mousemove", handleMouseMove)
+            window.removeEventListener("mouseup", handleMouseUp)
+        }
+    }, [measuredWaveW, tracks, seekTo])
+
+    // Computed marquee box
+    const marqueeBox = useMemo(() => {
+        if (!isDragging) return null
+        return {
+            left: Math.min(marqueeStart.x, marqueeEnd.x),
+            top: Math.min(marqueeStart.y, marqueeEnd.y),
+            width: Math.abs(marqueeEnd.x - marqueeStart.x),
+            height: Math.abs(marqueeEnd.y - marqueeStart.y),
+        }
+    }, [isDragging, marqueeStart, marqueeEnd])
+
+    // Cleanup
+    useEffect(
+        () => () => {
+            if (playheadRef.current) cancelAnimationFrame(playheadRef.current)
+            if (genIntervalRef.current) clearInterval(genIntervalRef.current)
+            if (genTimeoutRef.current) clearTimeout(genTimeoutRef.current)
+            if (sequenceTimerRef.current)
+                clearInterval(sequenceTimerRef.current)
+        },
+        []
+    )
+
+    // Sort tracks by row for rendering
+    const sortedTracks = useMemo(
+        () => [...tracks].sort((a, b) => a.row - b.row),
+        [tracks]
+    )
+
+    const visibleDuration = trackDuration
+    const tickInterval = trackDuration <= 15 ? 1 : trackDuration <= 30 ? 5 : 10
+    const ticks = useMemo(() => {
+        const arr: { time: number; pct: string }[] = []
+        for (let t = 0; t <= visibleDuration; t += tickInterval) {
+            arr.push({ time: t, pct: `${(t / visibleDuration) * 100}%` })
+        }
+        return arr
+    }, [visibleDuration, tickInterval])
+
+    const showProgress = isGenerating
+
+    // ============================================================
+    // Smooth color theme transition — lerp RGB over ~500ms
+    // ============================================================
+    const targetGlow = genres[selectedGenre]?.glow || "100,160,255"
+    const [r, g, b] = targetGlow.split(",").map(Number)
+    const glowAnimRef = useRef({ r, g, b })
+    const [smoothGlow, setSmoothGlow] = useState({ r, g, b })
+    const glowRafRef = useRef<number | null>(null)
+    const glowTargetRef = useRef({ r, g, b })
+
+    useEffect(() => {
+        glowTargetRef.current = { r, g, b }
+        let lastTime = performance.now()
+
+        const animate = (now: number) => {
+            const dt = Math.min((now - lastTime) / 1000, 0.05) // cap delta
+            lastTime = now
+            const speed = 4 // ~250ms to converge (higher = faster)
+            const cur = glowAnimRef.current
+            const tgt = glowTargetRef.current
+            const nr = cur.r + (tgt.r - cur.r) * Math.min(speed * dt, 1)
+            const ng = cur.g + (tgt.g - cur.g) * Math.min(speed * dt, 1)
+            const nb = cur.b + (tgt.b - cur.b) * Math.min(speed * dt, 1)
+            glowAnimRef.current = { r: nr, g: ng, b: nb }
+
+            // Only update state when the change is visible (>0.5 per channel)
+            if (
+                Math.abs(nr - tgt.r) > 0.5 ||
+                Math.abs(ng - tgt.g) > 0.5 ||
+                Math.abs(nb - tgt.b) > 0.5
+            ) {
+                setSmoothGlow({
+                    r: Math.round(nr),
+                    g: Math.round(ng),
+                    b: Math.round(nb),
+                })
+                glowRafRef.current = requestAnimationFrame(animate)
+            } else {
+                glowAnimRef.current = { ...tgt }
+                setSmoothGlow({ r: tgt.r, g: tgt.g, b: tgt.b })
+            }
+        }
+
+        glowRafRef.current = requestAnimationFrame(animate)
+        return () => {
+            if (glowRafRef.current) cancelAnimationFrame(glowRafRef.current)
+        }
+    }, [r, g, b])
+
+    // ============================================================
+    // RENDER
+    // ============================================================
+    const glowRGB = `${smoothGlow.r},${smoothGlow.g},${smoothGlow.b}`
+    const headerGlowRGB = genres[selectedGenre]?.glow || "100,160,255" // raw, not interpolated — CSS transition handles the fade
+    const gi = glowIntensity / 100 // normalize: 1 = default
+
+    return (
+        <div
+            style={{
+                width: "100%",
+                height: "100%",
+                minWidth: width,
+                minHeight: height,
+                ...frameStyle,
+                position: "relative",
+                padding: "20px 60px 60px 60px",
+                boxSizing: "border-box",
+                display: "flex",
+                flexDirection: "column",
+            }}
+        >
+            {/* Background video — behind everything */}
+            <video
+                ref={bgVideoRef}
+                src="https://storage.googleapis.com/audiocraft-411005.appspot.com/assets/sitebg2.mp4"
+                autoPlay
+                playsInline
+                muted
+                loop
+                preload="auto"
+                onCanPlay={() => setBgVideoLoaded(true)}
+                style={{
+                    position: "absolute",
+                    top: "50%",
+                    left: "50%",
+                    width: `${bgVideoScale}%`,
+                    height: `${bgVideoScale}%`,
+                    transform: "translate(-50%, -50%)",
+                    objectFit: "cover",
+                    opacity:
+                        bgVideoLoaded && bgReady ? bgVideoOpacity / 100 : 0,
+                    transition: "opacity 1s ease",
+                    pointerEvents: "none",
+                    zIndex: 0,
+                }}
+            />
+
+            {/* Luminous glow behind the DAW — color shifts with genre */}
+            <div
+                style={{
+                    position: "absolute",
+                    inset: -20,
+                    background: `radial-gradient(ellipse at 50% 55%, rgba(${glowRGB},${0.25 * gi}) 0%, rgba(${glowRGB},${0.12 * gi}) 25%, rgba(${glowRGB},${0.05 * gi}) 50%, transparent 75%)`,
+                    opacity: bgReady ? 1 : 0,
+                    transition: "opacity 1s ease, background 1.5s ease",
+                    pointerEvents: "none",
+                }}
+            />
+
+            {/* Cycling header */}
+            <div
+                style={{
+                    position: "relative",
+                    height: 110,
+                    opacity: cycleFade,
+                    transition: "opacity 0.4s ease",
+                    display: "flex",
+                    alignItems: "flex-end",
+                    justifyContent: "center",
+                    overflow: "hidden",
+                    flexShrink: 0,
+                    paddingBottom: 14,
+                }}
+            >
+                <AnimatePresence mode="wait">
+                    <motion.div
+                        key={headerIndex}
+                        initial={{ opacity: 0, y: 22, filter: "blur(10px)" }}
+                        animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+                        exit={{ opacity: 0, y: -22, filter: "blur(10px)" }}
+                        transition={{
+                            duration: 0.5,
+                            ease: [0.25, 0.8, 0.25, 1],
+                        }}
+                        style={{
+                            fontSize: 54,
+                            fontWeight: 700,
+                            letterSpacing: -1.5,
+                            fontFamily:
+                                "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+                            background: `linear-gradient(135deg, rgba(${headerGlowRGB},0.95) 0%, rgba(${headerGlowRGB},0.55) 100%)`,
+                            WebkitBackgroundClip: "text",
+                            WebkitTextFillColor: "transparent",
+                            backgroundClip: "text",
+                            textAlign: "center" as const,
+                            whiteSpace: "nowrap" as const,
+                            textShadow: "none",
+                            transition: "background 1.5s ease",
+                        }}
+                    >
+                        {headerTexts[headerIndex]}
+                    </motion.div>
+                </AnimatePresence>
+            </div>
+
+            <motion.div
+                ref={rootRef}
+                animate={{ y: [0, -swayIntensity, 0, swayIntensity * 0.67, 0] }}
+                transition={{
+                    duration: 8,
+                    repeat: Infinity,
+                    ease: "easeInOut",
+                }}
+                style={{
+                    width: "100%",
+                    flex: 1,
+                    minHeight: 0,
+                    overflow: "visible",
+                    position: "relative",
+                    fontFamily:
+                        "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+                    userSelect: "none",
+                    transition: "all 1.5s ease",
+                }}
+            >
+                {/* SVG filter for liquid glass edge refraction */}
+                <svg width="0" height="0" style={{ position: "absolute" }}>
+                    <defs>
+                        <filter
+                            id="liquid-edge"
+                            x="-5%"
+                            y="-5%"
+                            width="110%"
+                            height="110%"
+                        >
+                            <feTurbulence
+                                type="fractalNoise"
+                                baseFrequency="0.015"
+                                numOctaves="3"
+                                seed="2"
+                                result="noise"
+                            />
+                            <feDisplacementMap
+                                in="SourceGraphic"
+                                in2="noise"
+                                scale="3"
+                                xChannelSelector="R"
+                                yChannelSelector="G"
+                            />
+                        </filter>
+                        <filter id="glass-noise">
+                            <feTurbulence
+                                type="fractalNoise"
+                                baseFrequency="0.8"
+                                numOctaves="4"
+                                stitchTiles="stitch"
+                                result="noise"
+                            />
+                            <feColorMatrix
+                                type="saturate"
+                                values="0"
+                                in="noise"
+                                result="mono"
+                            />
+                            <feBlend
+                                in="SourceGraphic"
+                                in2="mono"
+                                mode="overlay"
+                            />
+                        </filter>
+                    </defs>
+                </svg>
+
+                {/* Inner glow — bleeds through all glass panels */}
+                <div
+                    style={{
+                        position: "absolute",
+                        inset: 0,
+                        background: `radial-gradient(ellipse at 50% 60%, rgba(${glowRGB},${0.18 * gi}) 0%, rgba(${glowRGB},${0.08 * gi}) 35%, rgba(${glowRGB},${0.03 * gi}) 60%, transparent 85%)`,
+                        transition: "background 1.5s ease",
+                        pointerEvents: "none",
+                        zIndex: 0,
+                    }}
+                />
+
+                {/* Glass noise texture overlay */}
+                <div
+                    style={{
+                        position: "absolute",
+                        inset: 0,
+                        borderRadius: 14,
+                        filter: "url(#glass-noise)",
+                        opacity: 0.03,
+                        background: "rgba(255,255,255,0.5)",
+                        pointerEvents: "none",
+                        zIndex: 100,
+                        mixBlendMode: "overlay" as const,
+                    }}
+                />
+
+                {/* Top highlight edge — refracted glass feel */}
+                <div
+                    style={{
+                        position: "absolute",
+                        top: 0,
+                        left: 20,
+                        right: 20,
+                        height: 1,
+                        background:
+                            "linear-gradient(90deg, transparent, rgba(255,255,255,0.08) 20%, rgba(255,255,255,0.12) 50%, rgba(255,255,255,0.08) 80%, transparent)",
+                        filter: "url(#liquid-edge)",
+                        pointerEvents: "none",
+                        zIndex: 100,
+                    }}
+                />
+
+                <style>{`
+                @keyframes marquee-pulse {
+                    0% { border-color: rgba(${glowRGB}, 0.6); box-shadow: 0 0 8px rgba(${glowRGB},0.2), inset 0 0 15px rgba(${glowRGB},0.05); }
+                    100% { border-color: rgba(${glowRGB}, 0.9); box-shadow: 0 0 12px rgba(${glowRGB},0.4), inset 0 0 25px rgba(${glowRGB},0.15); }
+                }
+            `}</style>
+
+                {/* ===== VIDEO CONTAINER — base layer, clipped with own radius ===== */}
+                <div
+                    style={{
+                        position: "absolute",
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        overflow: "hidden",
+                        borderRadius: 12,
+                        background: "rgba(10,10,14,0.2)",
+                        backdropFilter: "blur(2px)",
+                        border: `1px solid rgba(${glowRGB},0.1)`,
+                        boxShadow: `0 0 80px rgba(${glowRGB},${0.12 * gi}), 0 8px 32px rgba(0,0,0,0.5)`,
+                        transition: "all 1.5s ease, transform 0.3s ease",
+                        cursor: "default",
+                    }}
+                    onMouseEnter={(e) => {
+                        e.currentTarget.style.transform = "translateY(-2px)"
+                    }}
+                    onMouseLeave={(e) => {
+                        e.currentTarget.style.transform = "translateY(0)"
+                    }}
+                >
+                    {/* Video background — positioned at viz container by default, extends with sliders */}
+                    <video
+                        ref={videoRef}
+                        src={VIDEO_URL}
+                        playsInline
+                        muted
+                        loop
+                        preload="auto"
+                        style={{
+                            position: "absolute",
+                            top: 0,
+                            left: genPanelW - videoExtendW,
+                            width: `calc(100% - ${genPanelW - videoExtendW}px)`,
+                            height: vizHeight + videoExtendH,
+                            objectFit: "cover",
+                            opacity: videoLoaded && bgReady ? cycleFade : 0,
+                            transition: "opacity 1s ease",
+                            pointerEvents: "none",
+                        }}
+                    />
+
+                    {/* Glass blur overlays — sit between video and panels, blur the video in extended areas */}
+                    {videoExtendW > 0 && (
+                        <div
+                            style={{
+                                position: "absolute",
+                                top: 0,
+                                left: 0,
+                                width: genPanelW,
+                                height: vizHeight,
+                                backdropFilter: "blur(28px) saturate(160%)",
+                                WebkitBackdropFilter:
+                                    "blur(28px) saturate(160%)",
+                                pointerEvents: "none",
+                            }}
+                        />
+                    )}
+                    {videoExtendH > 0 && (
+                        <div
+                            style={{
+                                position: "absolute",
+                                left: 0,
+                                right: 0,
+                                bottom: 0,
+                                height: dawHeight,
+                                backdropFilter: "blur(24px) saturate(150%)",
+                                WebkitBackdropFilter:
+                                    "blur(24px) saturate(150%)",
+                                pointerEvents: "none",
+                            }}
+                        />
+                    )}
+
+                    {/* Video area — top right, left edge aligns with gen panel right edge */}
+                    <div
+                        style={{
+                            position: "absolute",
+                            left: genPanelW,
+                            top: 0,
+                            right: 0,
+                            height: vizHeight,
+                            display: "flex",
+                            flexDirection: "column",
+                            overflow: "hidden",
+                        }}
+                    >
+                        <div
+                            style={{
+                                display: "flex",
+                                gap: 0,
+                                borderBottom:
+                                    "1px solid rgba(255,255,255,0.06)",
+                                background: "rgba(6,6,12,0.25)",
+                                backdropFilter: "blur(16px) saturate(140%)",
+                                WebkitBackdropFilter:
+                                    "blur(16px) saturate(140%)",
+                            }}
+                        >
+                            {["Image", "FX", "Video", "MIDI", "Audio"].map(
+                                (tab, i) => {
+                                    const isActive = i === 2
+                                    return (
+                                        <div
+                                            key={tab}
+                                            style={{
+                                                padding: "7px 14px",
+                                                fontSize: 10,
+                                                fontWeight: 500,
+                                                color: isActive
+                                                    ? `rgba(${glowRGB},1)`
+                                                    : C.textMuted,
+                                                borderBottom: isActive
+                                                    ? `2px solid rgba(${glowRGB},1)`
+                                                    : "2px solid transparent",
+                                                background: isActive
+                                                    ? `rgba(${glowRGB},0.06)`
+                                                    : "transparent",
+                                                transition: "all 0.2s ease",
+                                            }}
+                                        >
+                                            {tab}
+                                        </div>
+                                    )
+                                }
+                            )}
+                        </div>
+                        <div
+                            style={{
+                                flex: 1,
+                                position: "relative",
+                                overflow: "hidden",
+                            }}
+                        >
+                            {/* Fallback animation — shows while video is loading */}
+                            {!videoLoaded && (
+                                <div
+                                    style={{
+                                        position: "absolute",
+                                        inset: 0,
+                                        display: "flex",
+                                        alignItems: "center",
+                                        justifyContent: "center",
+                                        background: `radial-gradient(ellipse at center, rgba(${glowRGB},0.08) 0%, transparent 70%)`,
+                                    }}
+                                >
+                                    <div
+                                        style={{
+                                            display: "flex",
+                                            flexDirection: "column",
+                                            alignItems: "center",
+                                            gap: 8,
+                                        }}
+                                    >
+                                        <motion.div
+                                            animate={{ rotate: 360 }}
+                                            transition={{
+                                                duration: 8,
+                                                repeat: Infinity,
+                                                ease: "linear",
+                                            }}
+                                            style={{
+                                                width: 80,
+                                                height: 80,
+                                                borderRadius: "50%",
+                                                border: `1px solid rgba(${glowRGB},0.25)`,
+                                                background: `rgba(${glowRGB},0.04)`,
+                                                backdropFilter: "blur(12px)",
+                                                boxShadow: `inset 0 0 20px rgba(${glowRGB},0.08), 0 0 30px rgba(${glowRGB},0.08)`,
+                                                display: "flex",
+                                                alignItems: "center",
+                                                justifyContent: "center",
+                                            }}
+                                        >
+                                            <motion.div
+                                                animate={{
+                                                    scale: [1, 1.15, 1],
+                                                }}
+                                                transition={{
+                                                    duration: 1.5,
+                                                    repeat: Infinity,
+                                                }}
+                                                style={{
+                                                    width: 40,
+                                                    height: 40,
+                                                    borderRadius: "50%",
+                                                    background: `linear-gradient(135deg, rgba(${glowRGB},0.8), rgba(${glowRGB},0.5))`,
+                                                    opacity: 0.6,
+                                                }}
+                                            />
+                                        </motion.div>
+                                        <span
+                                            style={{
+                                                fontSize: 10,
+                                                color: C.textMuted,
+                                            }}
+                                        >
+                                            Loading video...
+                                        </span>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+                {/* ===== END VIDEO CONTAINER ===== */}
+
+                {/* Generation Panel — floating layer, beneath DAW, above video */}
+                <div
+                    style={{
+                        position: "absolute",
+                        left: 0,
+                        top: -8,
+                        width: genPanelW,
+                        height: vizHeight + 28 + panelExtendH,
+                        zIndex: 1,
+                        background: "rgba(10,10,16,0.35)",
+                        backdropFilter: "blur(32px) saturate(170%)",
+                        WebkitBackdropFilter: "blur(32px) saturate(170%)",
+                        borderRadius: "12px 12px 0 0",
+                        border: "1px solid rgba(255,255,255,0.1)",
+                        borderBottom: "none",
+                        boxShadow: `0 6px 24px rgba(0,0,0,0.5), 0 2px 6px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.08), 0 0 40px rgba(${glowRGB},0.06)`,
+                        overflowX: "hidden" as const,
+                        overflowY: "auto" as const,
+                        padding: 14,
+                        paddingBottom: 34,
+                        boxSizing: "border-box",
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 12,
+                        transition: "transform 0.3s ease, box-shadow 0.3s ease",
+                        cursor: "default",
+                    }}
+                    onMouseEnter={(e) => {
+                        e.currentTarget.style.transform = "translateY(-3px)"
+                        e.currentTarget.style.boxShadow = `0 10px 32px rgba(0,0,0,0.6), 0 4px 10px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.1), 0 0 50px rgba(${glowRGB},0.1)`
+                    }}
+                    onMouseLeave={(e) => {
+                        e.currentTarget.style.transform = "translateY(0)"
+                        e.currentTarget.style.boxShadow = `0 6px 24px rgba(0,0,0,0.5), 0 2px 6px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.08), 0 0 40px rgba(${glowRGB},0.06)`
+                    }}
+                >
+                    <div
+                        style={{
+                            fontSize: 13,
+                            fontWeight: 700,
+                            color: C.text,
+                            paddingBottom: 10,
+                            borderBottom: "1px solid rgba(255,255,255,0.06)",
+                            textShadow: `0 0 20px rgba(${glowRGB},0.15)`,
+                        }}
+                    >
+                        Generate
+                    </div>
+
+                    <div>
+                        <div
+                            style={{
+                                fontSize: 10,
+                                color: C.textMuted,
+                                marginBottom: 6,
+                                fontWeight: 600,
+                                textTransform: "uppercase" as const,
+                                letterSpacing: 0.5,
+                            }}
+                        >
+                            Genre
+                        </div>
+                        <div
+                            style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 4,
+                            }}
+                        >
+                            <div
+                                onClick={() => navigateGenre(-1)}
+                                style={{
+                                    width: 18,
+                                    height: 18,
+                                    borderRadius: 5,
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    cursor: isGenerating
+                                        ? "default"
+                                        : "pointer",
+                                    color: C.textMuted,
+                                    flexShrink: 0,
+                                    background: "rgba(255,255,255,0.05)",
+                                    backdropFilter: "blur(8px)",
+                                    border: "1px solid rgba(255,255,255,0.08)",
+                                    boxShadow:
+                                        "inset 0 1px 0 rgba(255,255,255,0.04)",
+                                }}
+                            >
+                                <svg width="8" height="8" viewBox="0 0 8 8">
+                                    <path
+                                        d="M5.5 1L2.5 4l3 3"
+                                        stroke="currentColor"
+                                        strokeWidth="1.5"
+                                        fill="none"
+                                    />
+                                </svg>
+                            </div>
+                            <div
+                                style={{
+                                    flex: 1,
+                                    position: "relative",
+                                    height: 28,
+                                    overflow: "hidden",
+                                    borderRadius: 8,
+                                    background: `linear-gradient(135deg, rgba(${glowRGB},0.2), rgba(${glowRGB},0.1))`,
+                                    backdropFilter: "blur(12px) saturate(150%)",
+                                    WebkitBackdropFilter:
+                                        "blur(12px) saturate(150%)",
+                                    border: "1px solid rgba(255,255,255,0.06)",
+                                    boxShadow:
+                                        "inset 0 1px 0 rgba(255,255,255,0.04), inset 0 -1px 0 rgba(0,0,0,0.2)",
+                                    transition: "background 0.4s ease",
+                                }}
+                            >
+                                {genres.map((g, i) => {
+                                    const offset = i - selectedGenre
+                                    const wrappedOffset =
+                                        ((offset +
+                                            genres.length +
+                                            Math.floor(genres.length / 2)) %
+                                            genres.length) -
+                                        Math.floor(genres.length / 2)
+                                    const isCenter = wrappedOffset === 0
+                                    if (Math.abs(wrappedOffset) > 1) return null
+                                    return (
+                                        <div
+                                            key={g.name}
+                                            onClick={() => {
+                                                if (
+                                                    !isCenter &&
+                                                    !isGenerating
+                                                ) {
+                                                    setSelectedGenre(i)
+                                                    setSelectedInstruments(
+                                                        new Set(
+                                                            genreInstruments[
+                                                                i
+                                                            ] ||
+                                                                genreInstruments[0]
+                                                        )
+                                                    )
+                                                    handleGenreClick(i)
+                                                    cycleStartRef.current =
+                                                        Date.now() -
+                                                        i * GENRE_DURATION
+                                                    lastGenreRef.current = i
+                                                    lastTrackGenreRef.current =
+                                                        i
+                                                    headerIndexRef.current =
+                                                        i * 2
+                                                    setHeaderIndex(i * 2)
+                                                }
+                                            }}
+                                            style={{
+                                                position: "absolute",
+                                                top: 0,
+                                                bottom: 0,
+                                                left: `${50 + wrappedOffset * 100}%`,
+                                                transform: "translateX(-50%)",
+                                                display: "flex",
+                                                alignItems: "center",
+                                                justifyContent: "center",
+                                                whiteSpace: "nowrap" as const,
+                                                padding: "0 12px",
+                                                fontSize: isCenter ? 11 : 9,
+                                                fontWeight: isCenter
+                                                    ? 700
+                                                    : 500,
+                                                color: isCenter
+                                                    ? "#fff"
+                                                    : "rgba(255,255,255,0.2)",
+                                                cursor:
+                                                    isCenter || isGenerating
+                                                        ? "default"
+                                                        : "pointer",
+                                                transition: "all 0.4s ease",
+                                                pointerEvents:
+                                                    Math.abs(wrappedOffset) > 1
+                                                        ? ("none" as const)
+                                                        : ("auto" as const),
+                                            }}
+                                        >
+                                            {g.name}
+                                        </div>
+                                    )
+                                })}
+                            </div>
+                            <div
+                                onClick={() => navigateGenre(1)}
+                                style={{
+                                    width: 18,
+                                    height: 18,
+                                    borderRadius: 5,
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    cursor: isGenerating
+                                        ? "default"
+                                        : "pointer",
+                                    color: C.textMuted,
+                                    flexShrink: 0,
+                                    background: "rgba(255,255,255,0.05)",
+                                    backdropFilter: "blur(8px)",
+                                    border: "1px solid rgba(255,255,255,0.08)",
+                                    boxShadow:
+                                        "inset 0 1px 0 rgba(255,255,255,0.04)",
+                                }}
+                            >
+                                <svg width="8" height="8" viewBox="0 0 8 8">
+                                    <path
+                                        d="M2.5 1l3 3-3 3"
+                                        stroke="currentColor"
+                                        strokeWidth="1.5"
+                                        fill="none"
+                                    />
+                                </svg>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div>
+                        <div
+                            style={{
+                                fontSize: 10,
+                                color: C.textMuted,
+                                marginBottom: 6,
+                                fontWeight: 600,
+                                textTransform: "uppercase" as const,
+                                letterSpacing: 0.5,
+                            }}
+                        >
+                            Instruments
+                        </div>
+                        <div
+                            style={{
+                                display: "grid",
+                                gridTemplateColumns: "repeat(3, 1fr)",
+                                gap: 4,
+                            }}
+                        >
+                            {Array.from(
+                                genreInstruments[selectedGenre] ||
+                                    genreInstruments[0]
+                            ).map((idx) => {
+                                const inst = panelInstruments[idx]
+                                if (!inst) return null
+                                const isSelected = selectedInstruments.has(idx)
+                                return (
+                                    <div
+                                        key={inst.name}
+                                        onClick={() => {
+                                            if (isGenerating) return
+                                            setSelectedInstruments((prev) => {
+                                                const next = new Set(prev)
+                                                if (next.has(idx))
+                                                    next.delete(idx)
+                                                else next.add(idx)
+                                                return next
+                                            })
+                                        }}
+                                        style={{
+                                            display: "flex",
+                                            flexDirection: "column" as const,
+                                            alignItems: "center",
+                                            gap: 3,
+                                            padding: "6px 2px",
+                                            borderRadius: 8,
+                                            cursor: isGenerating
+                                                ? "default"
+                                                : "pointer",
+                                            background: isSelected
+                                                ? `linear-gradient(135deg, rgba(${glowRGB},0.2), rgba(${glowRGB},0.1))`
+                                                : "rgba(255,255,255,0.03)",
+                                            backdropFilter:
+                                                "blur(10px) saturate(140%)",
+                                            WebkitBackdropFilter:
+                                                "blur(10px) saturate(140%)",
+                                            border: `1px solid ${isSelected ? `rgba(${glowRGB},0.4)` : "rgba(255,255,255,0.06)"}`,
+                                            boxShadow: isSelected
+                                                ? `inset 0 1px 0 rgba(${glowRGB},0.15), 0 0 10px rgba(${glowRGB},0.1)`
+                                                : "inset 0 1px 0 rgba(255,255,255,0.03)",
+                                            color: isSelected
+                                                ? "#fff"
+                                                : C.textMuted,
+                                            transition: "all 0.2s ease",
+                                        }}
+                                    >
+                                        <div
+                                            style={{
+                                                opacity: isSelected ? 1 : 0.6,
+                                            }}
+                                        >
+                                            {inst.icon}
+                                        </div>
+                                        <span
+                                            style={{
+                                                fontSize: 7,
+                                                fontWeight: 600,
+                                                letterSpacing: 0.3,
+                                            }}
+                                        >
+                                            {inst.name}
+                                        </span>
+                                    </div>
+                                )
+                            })}
+                        </div>
+                    </div>
+
+                    {/* Progress */}
+                    <div
+                        style={{
+                            opacity: showProgress ? 1 : 0,
+                            transition: "opacity 0.3s ease",
+                            pointerEvents: showProgress
+                                ? ("auto" as const)
+                                : ("none" as const),
+                            background: `rgba(${glowRGB},0.06)`,
+                            backdropFilter: "blur(12px) saturate(150%)",
+                            WebkitBackdropFilter: "blur(12px) saturate(150%)",
+                            border: `1px solid rgba(${glowRGB},0.15)`,
+                            boxShadow: `inset 0 1px 0 rgba(${glowRGB},0.08), 0 0 20px rgba(${glowRGB},0.05)`,
+                            borderRadius: 10,
+                            padding: 10,
+                        }}
+                    >
+                        <div style={{ marginBottom: 5 }}>
+                            <span
+                                style={{
+                                    fontSize: 10,
+                                    color: `rgba(${glowRGB},1)`,
+                                    fontWeight: 600,
+                                }}
+                            >
+                                Generating...
+                            </span>
+                        </div>
+                        <div
+                            style={{
+                                height: 5,
+                                borderRadius: 3,
+                                background: "rgba(255,255,255,0.04)",
+                                boxShadow: "inset 0 1px 2px rgba(0,0,0,0.3)",
+                                overflow: "hidden",
+                            }}
+                        >
+                            <div
+                                style={{
+                                    width: `${genProgress * 100}%`,
+                                    height: "100%",
+                                    borderRadius: 3,
+                                    background: `linear-gradient(135deg, rgba(${glowRGB},0.9), rgba(${glowRGB},0.6))`,
+                                    transition: "width 0.3s ease",
+                                    boxShadow: `0 0 8px rgba(${glowRGB},0.4)`,
+                                }}
+                            />
+                        </div>
+                    </div>
+
+                    <div
+                        style={{
+                            padding: "10px 0",
+                            borderRadius: 10,
+                            textAlign: "center" as const,
+                            background: isGenerating
+                                ? `rgba(${glowRGB},0.12)`
+                                : `linear-gradient(135deg, rgba(${glowRGB},0.85) 0%, rgba(${glowRGB},0.55) 100%)`,
+                            backdropFilter: "blur(12px) saturate(160%)",
+                            WebkitBackdropFilter: "blur(12px) saturate(160%)",
+                            border: isGenerating
+                                ? `1px solid rgba(${glowRGB},0.2)`
+                                : "1px solid rgba(255,255,255,0.15)",
+                            boxShadow: isGenerating
+                                ? "none"
+                                : `inset 0 1px 0 rgba(255,255,255,0.2), 0 4px 16px rgba(${glowRGB},0.25), 0 0 30px rgba(${glowRGB},0.1)`,
+                            color: "#fff",
+                            fontSize: 12,
+                            fontWeight: 600,
+                            cursor: isGenerating ? "default" : "pointer",
+                            transition: "all 0.3s ease",
+                        }}
+                    >
+                        {isGenerating ? "Generating..." : "Generate"}
+                    </div>
+                </div>
+
+                {/* ===== DAW ===== top floating layer, wider than video container */}
+                <div
+                    style={{
+                        position: "absolute",
+                        left: -10,
+                        right: -10,
+                        bottom: -4,
+                        height: dawHeight + 12,
+                        zIndex: 2,
+                        display: "flex",
+                        flexDirection: "column",
+                        background: "rgba(6,6,10,0.3)",
+                        backdropFilter: "blur(28px) saturate(170%)",
+                        WebkitBackdropFilter: "blur(28px) saturate(170%)",
+                        borderRadius: "16px 16px 0 0",
+                        border: "1px solid rgba(255,255,255,0.12)",
+                        borderBottom: "none",
+                        boxShadow: `0 -10px 40px rgba(0,0,0,0.6), 0 -3px 12px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.1), 0 0 50px rgba(${glowRGB},0.08)`,
+                        transition: "transform 0.3s ease, box-shadow 0.3s ease",
+                        cursor: "default",
+                    }}
+                    onMouseEnter={(e) => {
+                        e.currentTarget.style.transform = "translateY(-3px)"
+                        e.currentTarget.style.boxShadow = `0 -14px 48px rgba(0,0,0,0.7), 0 -4px 16px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.12), 0 0 60px rgba(${glowRGB},0.12)`
+                    }}
+                    onMouseLeave={(e) => {
+                        e.currentTarget.style.transform = "translateY(0)"
+                        e.currentTarget.style.boxShadow = `0 -10px 40px rgba(0,0,0,0.6), 0 -3px 12px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.1), 0 0 50px rgba(${glowRGB},0.08)`
+                    }}
+                >
+                    {/* Transport controls */}
+                    <div
+                        style={{
+                            height: controlsH,
+                            minHeight: controlsH,
+                            display: "flex",
+                            alignItems: "center",
+                            padding: "0 10px",
+                            background: "rgba(8,8,14,0.15)",
+                            backdropFilter: "blur(24px) saturate(170%)",
+                            WebkitBackdropFilter: "blur(24px) saturate(170%)",
+                            borderBottom: "1px solid rgba(255,255,255,0.08)",
+                            borderRadius: "16px 16px 0 0",
+                            boxShadow:
+                                "inset 0 1px 0 rgba(255,255,255,0.05), inset 0 -1px 0 rgba(255,255,255,0.03)",
+                            gap: 6,
+                        }}
+                    >
+                        <motion.button
+                            onClick={handlePlay}
+                            whileHover={{ scale: 1.08 }}
+                            whileTap={{ scale: 0.92 }}
+                            style={{
+                                width: 26,
+                                height: 26,
+                                borderRadius: 6,
+                                border: `1px solid ${isPlaying ? `rgba(${glowRGB},0.5)` : "rgba(255,255,255,0.1)"}`,
+                                background: isPlaying
+                                    ? `rgba(${glowRGB},0.2)`
+                                    : "rgba(255,255,255,0.06)",
+                                backdropFilter: "blur(12px)",
+                                boxShadow: isPlaying
+                                    ? `inset 0 1px 0 rgba(${glowRGB},0.2), 0 0 12px rgba(${glowRGB},0.15)`
+                                    : "inset 0 1px 0 rgba(255,255,255,0.06)",
+                                color: isPlaying ? "#fff" : "#ccc",
+                                cursor: "pointer",
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                outline: "none",
+                                padding: 0,
+                            }}
+                        >
+                            {isPlaying ? Icons.pause : Icons.play}
+                        </motion.button>
+                        <div
+                            style={{
+                                width: 26,
+                                height: 26,
+                                borderRadius: 6,
+                                border: "1px solid rgba(255,255,255,0.1)",
+                                background: "rgba(255,255,255,0.06)",
+                                backdropFilter: "blur(12px)",
+                                boxShadow:
+                                    "inset 0 1px 0 rgba(255,255,255,0.06)",
+                                color: "#ccc",
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                            }}
+                        >
+                            {Icons.stop}
+                        </div>
+                        <div
+                            style={{
+                                color: "#fff",
+                                fontSize: 11,
+                                fontWeight: 600,
+                                minWidth: 42,
+                                padding: "0 6px",
+                                background: "rgba(6,6,12,0.2)",
+                                backdropFilter: "blur(14px)",
+                                border: "1px solid rgba(255,255,255,0.08)",
+                                boxShadow:
+                                    "inset 0 1px 0 rgba(255,255,255,0.04)",
+                                borderRadius: 6,
+                                height: 26,
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                fontVariantNumeric: "tabular-nums",
+                            }}
+                        >
+                            {timeDisplay}
+                        </div>
+                        {/* Volume slider */}
+                        <div
+                            style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 5,
+                                marginLeft: 2,
+                            }}
+                        >
+                            <svg
+                                width="12"
+                                height="12"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="rgba(255,255,255,0.4)"
+                                strokeWidth="2"
+                            >
+                                <path d="M11 5L6 9H2v6h4l5 4V5z" />
+                                <path d="M19.07 4.93a10 10 0 010 14.14M15.54 8.46a5 5 0 010 7.07" />
+                            </svg>
+                            <div
+                                style={{
+                                    width: 60,
+                                    height: 4,
+                                    borderRadius: 2,
+                                    background: "rgba(255,255,255,0.08)",
+                                    overflow: "hidden",
+                                }}
+                            >
+                                <div
+                                    style={{
+                                        width: "80%",
+                                        height: "100%",
+                                        borderRadius: 2,
+                                        background: "rgba(255,255,255,0.3)",
+                                    }}
+                                />
+                            </div>
+                        </div>
+                        <div style={{ flex: 1 }} />
+                        <div
+                            style={{
+                                padding: "3px 8px",
+                                borderRadius: 6,
+                                fontSize: 10,
+                                background: "rgba(255,255,255,0.04)",
+                                backdropFilter: "blur(10px)",
+                                border: "1px solid rgba(255,255,255,0.08)",
+                                boxShadow:
+                                    "inset 0 1px 0 rgba(255,255,255,0.04)",
+                                color: C.textMuted,
+                                fontVariantNumeric: "tabular-nums",
+                            }}
+                        >
+                            120 BPM
+                        </div>
+                        <div style={{ display: "flex", gap: 3 }}>
+                            {["-", "+"].map((z) => (
+                                <div
+                                    key={z}
+                                    style={{
+                                        width: 22,
+                                        height: 22,
+                                        borderRadius: 3,
+                                        color: C.textMuted,
+                                        display: "flex",
+                                        alignItems: "center",
+                                        justifyContent: "center",
+                                        fontSize: 12,
+                                    }}
+                                >
+                                    {z}
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* Timeline */}
+                    <div
+                        style={{
+                            height: timelineH,
+                            minHeight: timelineH,
+                            display: "flex",
+                            borderBottom: "1px solid rgba(255,255,255,0.06)",
+                            background: "rgba(6,6,12,0.15)",
+                            backdropFilter: "blur(20px) saturate(150%)",
+                            WebkitBackdropFilter: "blur(20px) saturate(150%)",
+                        }}
+                    >
+                        <div
+                            style={{
+                                width: labelW,
+                                minWidth: labelW,
+                                background: "rgba(6,6,12,0.15)",
+                                borderRight: "1px solid rgba(255,255,255,0.06)",
+                                display: "flex",
+                                alignItems: "center",
+                                paddingLeft: 10,
+                            }}
+                        >
+                            <span style={{ fontSize: 9, color: C.textDim }}>
+                                + Add Track
+                            </span>
+                        </div>
+                        <div
+                            style={{
+                                flex: 1,
+                                position: "relative",
+                                background: "rgba(6,6,10,0.1)",
+                                cursor: "pointer",
+                            }}
+                            onClick={(e) => {
+                                const rect =
+                                    e.currentTarget.getBoundingClientRect()
+                                const frac =
+                                    (e.clientX - rect.left) / rect.width
+                                seekTo(frac)
+                            }}
+                        >
+                            {ticks.map((tick) => (
+                                <div
+                                    key={tick.time}
+                                    style={{
+                                        position: "absolute",
+                                        left: tick.pct,
+                                        top: 0,
+                                        height: "100%",
+                                    }}
+                                >
+                                    <span
+                                        style={{
+                                            position: "absolute",
+                                            top: 5,
+                                            left: 3,
+                                            color: C.textDim,
+                                            fontSize: 8,
+                                            whiteSpace: "nowrap",
+                                        }}
+                                    >
+                                        {tick.time}s
+                                    </span>
+                                    <div
+                                        style={{
+                                            position: "absolute",
+                                            bottom: 0,
+                                            left: 0,
+                                            width: 1,
+                                            height: 8,
+                                            background: "#333",
+                                        }}
+                                    />
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* Track area — drag-to-create target */}
+                    <div
+                        ref={trackAreaRef}
+                        onMouseDown={handleTrackAreaMouseDown}
+                        style={{
+                            flex: 1,
+                            position: "relative",
+                            overflow: "hidden",
+                            cursor: isDragging ? "crosshair" : "crosshair",
+                        }}
+                    >
+                        {/* Row backgrounds + labels (one per unique row) */}
+                        {Array.from(new Set(sortedTracks.map((t) => t.row)))
+                            .sort((a, b) => a - b)
+                            .map((row) => {
+                                const rowTracks = sortedTracks.filter(
+                                    (t) => t.row === row
+                                )
+                                const primary =
+                                    rowTracks.find((t) => !t.isPlaceholder) ||
+                                    rowTracks[0]
+                                if (!primary) return null
+                                return (
+                                    <div
+                                        key={`row-${row}`}
+                                        style={{
+                                            position: "absolute",
+                                            top: row * trackHeight,
+                                            left: 0,
+                                            right: 0,
+                                            height: trackHeight,
+                                            borderBottom:
+                                                "1px solid rgba(255,255,255,0.04)",
+                                            zIndex: 1,
+                                        }}
+                                    >
+                                        <div
+                                            style={{
+                                                position: "absolute",
+                                                left: 0,
+                                                top: 0,
+                                                bottom: 0,
+                                                width: labelW,
+                                                display: "flex",
+                                                alignItems: "center",
+                                                padding: "0 6px",
+                                                gap: 6,
+                                                background: "rgba(8,8,14,0.2)",
+                                                backdropFilter:
+                                                    "blur(20px) saturate(150%)",
+                                                WebkitBackdropFilter:
+                                                    "blur(20px) saturate(150%)",
+                                                borderRight:
+                                                    "1px solid rgba(255,255,255,0.06)",
+                                                boxShadow:
+                                                    "inset -1px 0 0 rgba(255,255,255,0.03)",
+                                            }}
+                                        >
+                                            <div
+                                                style={{
+                                                    width: 4,
+                                                    height: 38,
+                                                    borderRadius: 2,
+                                                    background: `linear-gradient(180deg, rgba(${glowRGB},0.8), rgba(${glowRGB},0.4))`,
+                                                }}
+                                            />
+                                            {primary.isPlaceholder ? (
+                                                <motion.span
+                                                    animate={{
+                                                        opacity: [1, 0.4, 1],
+                                                    }}
+                                                    transition={{
+                                                        duration: 1.2,
+                                                        repeat: Infinity,
+                                                        ease: "easeInOut",
+                                                    }}
+                                                    style={{
+                                                        color: `rgba(${glowRGB},1)`,
+                                                        fontSize: 11,
+                                                        fontWeight: 600,
+                                                        whiteSpace: "nowrap",
+                                                    }}
+                                                >
+                                                    {primary.name}
+                                                    {[0, 1, 2].map((i) => (
+                                                        <motion.span
+                                                            key={i}
+                                                            animate={{
+                                                                opacity: [
+                                                                    0.2, 1, 0.2,
+                                                                ],
+                                                            }}
+                                                            transition={{
+                                                                duration: 1.2,
+                                                                repeat: Infinity,
+                                                                delay: i * 0.2,
+                                                            }}
+                                                        >
+                                                            .
+                                                        </motion.span>
+                                                    ))}
+                                                </motion.span>
+                                            ) : (
+                                                <>
+                                                    <div
+                                                        style={{
+                                                            width: 30,
+                                                            height: 30,
+                                                            borderRadius: 6,
+                                                            display: "flex",
+                                                            alignItems:
+                                                                "center",
+                                                            justifyContent:
+                                                                "center",
+                                                            color: C.text,
+                                                            opacity: 0.9,
+                                                        }}
+                                                    >
+                                                        {primary.icon}
+                                                    </div>
+                                                    <div
+                                                        style={{
+                                                            flex: 1,
+                                                            minWidth: 0,
+                                                        }}
+                                                    >
+                                                        <div
+                                                            style={{
+                                                                fontSize: 11,
+                                                                fontWeight: 600,
+                                                                color: C.text,
+                                                                whiteSpace:
+                                                                    "nowrap",
+                                                                overflow:
+                                                                    "hidden",
+                                                                textOverflow:
+                                                                    "ellipsis",
+                                                            }}
+                                                        >
+                                                            {primary.name}
+                                                        </div>
+                                                        <div
+                                                            style={{
+                                                                display: "flex",
+                                                                gap: 3,
+                                                                marginTop: 3,
+                                                            }}
+                                                        >
+                                                            <div
+                                                                onClick={() =>
+                                                                    setMutedRows(
+                                                                        (
+                                                                            prev
+                                                                        ) => {
+                                                                            const next =
+                                                                                new Set(
+                                                                                    prev
+                                                                                )
+                                                                            if (
+                                                                                next.has(
+                                                                                    row
+                                                                                )
+                                                                            )
+                                                                                next.delete(
+                                                                                    row
+                                                                                )
+                                                                            else
+                                                                                next.add(
+                                                                                    row
+                                                                                )
+                                                                            return next
+                                                                        }
+                                                                    )
+                                                                }
+                                                                style={{
+                                                                    width: 16,
+                                                                    height: 14,
+                                                                    borderRadius: 3,
+                                                                    border: `1px solid ${mutedRows.has(row) ? "rgba(220,180,50,0.4)" : "rgba(255,255,255,0.08)"}`,
+                                                                    background:
+                                                                        mutedRows.has(
+                                                                            row
+                                                                        )
+                                                                            ? "rgba(220,180,50,0.25)"
+                                                                            : "transparent",
+                                                                    color: mutedRows.has(
+                                                                        row
+                                                                    )
+                                                                        ? "rgba(220,180,50,1)"
+                                                                        : "rgba(255,255,255,0.3)",
+                                                                    fontSize: 7,
+                                                                    fontWeight: 700,
+                                                                    cursor: "pointer",
+                                                                    display:
+                                                                        "flex",
+                                                                    alignItems:
+                                                                        "center",
+                                                                    justifyContent:
+                                                                        "center",
+                                                                }}
+                                                            >
+                                                                M
+                                                            </div>
+                                                            <div
+                                                                onClick={() =>
+                                                                    setSoloRow(
+                                                                        (
+                                                                            prev
+                                                                        ) =>
+                                                                            prev ===
+                                                                            row
+                                                                                ? null
+                                                                                : row
+                                                                    )
+                                                                }
+                                                                style={{
+                                                                    width: 16,
+                                                                    height: 14,
+                                                                    borderRadius: 3,
+                                                                    border: `1px solid ${soloRow === row ? "rgba(80,180,255,0.4)" : "rgba(255,255,255,0.08)"}`,
+                                                                    background:
+                                                                        soloRow ===
+                                                                        row
+                                                                            ? "rgba(80,180,255,0.25)"
+                                                                            : "transparent",
+                                                                    color:
+                                                                        soloRow ===
+                                                                        row
+                                                                            ? "rgba(80,180,255,1)"
+                                                                            : "rgba(255,255,255,0.3)",
+                                                                    fontSize: 7,
+                                                                    fontWeight: 700,
+                                                                    cursor: "pointer",
+                                                                    display:
+                                                                        "flex",
+                                                                    alignItems:
+                                                                        "center",
+                                                                    justifyContent:
+                                                                        "center",
+                                                                }}
+                                                            >
+                                                                S
+                                                            </div>
+                                                            <div
+                                                                style={{
+                                                                    flex: 1,
+                                                                    height: 3,
+                                                                    borderRadius: 2,
+                                                                    background:
+                                                                        "rgba(255,255,255,0.06)",
+                                                                    marginTop: 5,
+                                                                    marginLeft: 4,
+                                                                    overflow:
+                                                                        "hidden",
+                                                                }}
+                                                            >
+                                                                <div
+                                                                    style={{
+                                                                        width: "75%",
+                                                                        height: "100%",
+                                                                        borderRadius: 2,
+                                                                        background:
+                                                                            "rgba(255,255,255,0.2)",
+                                                                    }}
+                                                                />
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </>
+                                            )}
+                                        </div>
+                                        <div
+                                            style={{
+                                                position: "absolute",
+                                                left: labelW,
+                                                top: 0,
+                                                right: 0,
+                                                bottom: 0,
+                                                background: "rgba(6,6,10,0.15)",
+                                                backdropFilter:
+                                                    "blur(20px) saturate(150%)",
+                                                WebkitBackdropFilter:
+                                                    "blur(20px) saturate(150%)",
+                                            }}
+                                        />
+                                    </div>
+                                )
+                            })}
+
+                        {/* Waveform area — percentage-based so timeline always fills */}
+                        <div
+                            ref={waveAreaRef}
+                            style={{
+                                position: "absolute",
+                                left: labelW,
+                                top: 0,
+                                right: 0,
+                                bottom: 0,
+                                zIndex: 2,
+                            }}
+                        >
+                            {/* Grid lines */}
+                            {ticks.map((tick) => (
+                                <div
+                                    key={`g${tick.time}`}
+                                    style={{
+                                        position: "absolute",
+                                        top: 0,
+                                        left: tick.pct,
+                                        width: 1,
+                                        height: "100%",
+                                        background: "rgba(255,255,255,0.025)",
+                                        pointerEvents: "none",
+                                    }}
+                                />
+                            ))}
+
+                            {/* Clips — percentage positioned, fade with cycle */}
+                            <div style={{ opacity: cycleFade }}>
+                                <AnimatePresence>
+                                    {sortedTracks.map((track) => {
+                                        // Color logic — renderer determines all colors from activeTrackGenre:
+                                        // - Placeholders: dynamic glow (current visual color during loading)
+                                        // Mute/solo override: forced grey regardless of genre
+                                        const isMutedOrSuppressed =
+                                            mutedRows.has(track.row) ||
+                                            (soloRow !== null &&
+                                                track.row !== soloRow)
+                                        // Genre-based active check
+                                        const isActive =
+                                            !isMutedOrSuppressed &&
+                                            (track.isPlaceholder ||
+                                                (track.genreClip &&
+                                                    track.genreIndex ===
+                                                        activeTrackGenre) ||
+                                                (!track.genreClip &&
+                                                    activeTrackGenre === 0))
+                                        let tColor: string
+                                        let tColorBg: string
+
+                                        const shadeShifts = [
+                                            [0, 0, 0], // base
+                                            [30, -20, 20], // warmer
+                                            [-20, 20, 30], // cooler
+                                            [20, 10, -30], // shifted
+                                            [-10, 30, -10], // green-tinted
+                                            [30, -10, -20], // red-tinted
+                                        ]
+
+                                        if (isActive) {
+                                            // Placeholders use live glow; completed tracks use static genre glow
+                                            // so CSS transition handles color fade in sync with grey fade
+                                            const glow = track.isPlaceholder
+                                                ? glowRGB
+                                                : genres[activeTrackGenre]
+                                                      ?.glow || "100,160,255"
+                                            const [gr, gg, gb] = glow
+                                                .split(",")
+                                                .map(Number)
+                                            const shift =
+                                                shadeShifts[
+                                                    track.row %
+                                                        shadeShifts.length
+                                                ]
+                                            const cr = Math.max(
+                                                0,
+                                                Math.min(255, gr + shift[0])
+                                            )
+                                            const cg = Math.max(
+                                                0,
+                                                Math.min(255, gg + shift[1])
+                                            )
+                                            const cb = Math.max(
+                                                0,
+                                                Math.min(255, gb + shift[2])
+                                            )
+                                            tColor = `rgba(${cr},${cg},${cb},0.7)`
+                                            tColorBg = `rgba(${cr},${cg},${cb},0.06)`
+                                        } else {
+                                            // Inactive: grey
+                                            tColor = greyColor
+                                            tColorBg = greyColorBg
+                                        }
+                                        return (
+                                            <motion.div
+                                                key={track.id}
+                                                initial={{ scale: 0.92, y: 6 }}
+                                                animate={{ scale: 1, y: 0 }}
+                                                transition={{
+                                                    duration: 0.4,
+                                                    ease: [0.2, 0.8, 0.2, 1],
+                                                }}
+                                                whileHover={
+                                                    track.isPlaceholder
+                                                        ? {}
+                                                        : {
+                                                              scale: 1.012,
+                                                              y: -1.5,
+                                                              transition: {
+                                                                  duration: 0.2,
+                                                              },
+                                                          }
+                                                }
+                                                style={{
+                                                    position: "absolute",
+                                                    top:
+                                                        track.row *
+                                                            trackHeight +
+                                                        3,
+                                                    left: `calc(${track.startFrac * 100}% + 3px)`,
+                                                    width: `calc(${track.widthFrac * 100}% - 6px)`,
+                                                    height: trackHeight - 6,
+                                                    zIndex: 2,
+                                                    overflow: "hidden",
+                                                    borderRadius: 8,
+                                                    transformStyle:
+                                                        "preserve-3d" as const,
+                                                    perspective: 800,
+                                                }}
+                                            >
+                                                {/* Container — transitions from plain dark (placeholder) to themed glass (completed) */}
+                                                <div
+                                                    style={{
+                                                        position: "absolute",
+                                                        inset: 0,
+                                                        borderRadius: 8,
+                                                        ...(isActive ? {
+                                                            background: track.isPlaceholder
+                                                                ? `rgba(${glowRGB},0.06)`
+                                                                : `linear-gradient(135deg, ${tColor.replace("0.7", "0.38")} 0%, ${tColor.replace("0.7", "0.20")} 40%, ${tColor.replace("0.7", "0.14")} 60%, ${tColor.replace("0.7", "0.30")} 100%)`,
+                                                            backdropFilter: track.isPlaceholder
+                                                                ? "none"
+                                                                : "blur(6px) saturate(200%) brightness(1.15)",
+                                                            border: track.isPlaceholder
+                                                                ? `1px solid rgba(${glowRGB},0.12)`
+                                                                : `1px solid ${tColor.replace("0.7", "0.3")}`,
+                                                            borderLeft: track.isPlaceholder
+                                                                ? `1px solid rgba(${glowRGB},0.12)`
+                                                                : `2px solid ${tColor.replace("0.7", "0.55")}`,
+                                                            borderTop: track.isPlaceholder
+                                                                ? `1px solid rgba(${glowRGB},0.12)`
+                                                                : `1px solid ${tColor.replace("0.7", "0.35")}`,
+                                                            boxShadow: track.isPlaceholder
+                                                                ? `0 4px 16px rgba(0,0,0,0.3), 0 1px 3px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.06), 0 0 20px ${tColor.replace("0.7", "0.06")}`
+                                                                : `0 4px 16px rgba(0,0,0,0.35), 0 1px 3px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.12), inset 0 -1px 0 rgba(0,0,0,0.1), inset 0 0 30px ${tColor.replace("0.7", "0.08")}, 0 0 24px ${tColor.replace("0.7", "0.1")}`,
+                                                        } : {
+                                                            background: `rgba(100,100,100,0.06)`,
+                                                            border: `1px solid rgba(100,100,100,0.12)`,
+                                                            boxShadow: `0 4px 16px rgba(0,0,0,0.3), 0 1px 3px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.06)`,
+                                                        }),
+                                                        transition: "background 0.6s ease, border 0.6s ease, border-left 0.6s ease, border-top 0.6s ease, box-shadow 0.6s ease, backdrop-filter 0.6s ease",
+                                                        display: "flex",
+                                                        alignItems: "center",
+                                                        padding: "0 4px",
+                                                    }}
+                                                >
+                                                    {track.isPlaceholder ? (
+                                                        <NoiseWaveform
+                                                            width={Math.max(
+                                                                50,
+                                                                track.widthFrac *
+                                                                    measuredWaveW -
+                                                                    14
+                                                            )}
+                                                            height={
+                                                                trackHeight - 22
+                                                            }
+                                                            color={isActive ? tColor : greyColor}
+                                                        />
+                                                    ) : (
+                                                        <WaveformSVG
+                                                            color={isActive ? "rgba(255,255,255,0.85)" : greyColor}
+                                                            seed={
+                                                                track.seed
+                                                            }
+                                                            width={Math.max(
+                                                                50,
+                                                                track.widthFrac *
+                                                                    measuredWaveW -
+                                                                    14
+                                                            )}
+                                                            height={
+                                                                trackHeight -
+                                                                22
+                                                            }
+                                                        />
+                                                    )}
+                                                </div>
+                                            </motion.div>
+                                        )
+                                    })}
+                                </AnimatePresence>
+                            </div>
+
+                            {/* Playhead */}
+                            {(isPlaying || playheadProgress > 0) && (
+                                <>
+                                    <div
+                                        style={{
+                                            position: "absolute",
+                                            top: 0,
+                                            left: `${playheadProgress * 100}%`,
+                                            width: 1.5,
+                                            height: "100%",
+                                            background: "#fff",
+                                            boxShadow:
+                                                "0 0 8px rgba(255,255,255,0.25)",
+                                            zIndex: 50,
+                                            pointerEvents: "none",
+                                        }}
+                                    />
+                                    {/* Draggable playhead handle — wide hit area */}
+                                    <div
+                                        style={{
+                                            position: "absolute",
+                                            top: -4,
+                                            left: `calc(${playheadProgress * 100}% - 10px)`,
+                                            width: 20,
+                                            height: 16,
+                                            zIndex: 52,
+                                            cursor: "ew-resize",
+                                            display: "flex",
+                                            alignItems: "flex-start",
+                                            justifyContent: "center",
+                                        }}
+                                        onMouseDown={(e) => {
+                                            e.preventDefault()
+                                            e.stopPropagation()
+                                            seekDragRef.current = true
+                                            const waveArea = waveAreaRef.current
+                                            if (waveArea)
+                                                waveAreaRectRef.current =
+                                                    waveArea.getBoundingClientRect()
+                                        }}
+                                    >
+                                        <div
+                                            style={{
+                                                width: 0,
+                                                height: 0,
+                                                borderLeft:
+                                                    "5px solid transparent",
+                                                borderRight:
+                                                    "5px solid transparent",
+                                                borderTop: "8px solid #fff",
+                                                marginTop: 3,
+                                            }}
+                                        />
+                                    </div>
+                                </>
+                            )}
+                        </div>
+
+                        {/* Empty state hint */}
+                        {tracks.length === 0 && !isDragging && (
+                            <div
+                                style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    height: "100%",
+                                    color: "#2a2a2a",
+                                    fontSize: 12,
+                                    flexDirection: "column",
+                                    gap: 6,
+                                    pointerEvents: "none",
+                                }}
+                            >
+                                <div style={{ opacity: 0.5 }}>{Icons.wand}</div>
+                                <span>Drag to create tracks</span>
+                            </div>
+                        )}
+
+                        {/* Marquee selection box */}
+                        {marqueeBox && (
+                            <div
+                                style={{
+                                    position: "absolute",
+                                    left: marqueeBox.left,
+                                    top: marqueeBox.top,
+                                    width: marqueeBox.width,
+                                    height: marqueeBox.height,
+                                    background: `rgba(${glowRGB}, 0.1)`,
+                                    backdropFilter: "blur(4px) saturate(130%)",
+                                    border: `1.5px solid rgba(${glowRGB}, 0.6)`,
+                                    borderRadius: 4,
+                                    boxShadow: `inset 0 0 20px rgba(${glowRGB},0.08), 0 0 16px rgba(${glowRGB},0.15)`,
+                                    pointerEvents: "none",
+                                    zIndex: 1000,
+                                    animation:
+                                        "marquee-pulse 0.8s ease-in-out infinite alternate",
+                                }}
+                            />
+                        )}
+                    </div>
+                </div>
+                {/* ===== END DAW ===== */}
+            </motion.div>
+        </div>
+    )
+}
+
+addPropertyControls(DAW2Animation, {
+    trackDuration: {
+        type: ControlType.Number,
+        title: "Duration (s)",
+        defaultValue: 30,
+        min: 5,
+        max: 120,
+        step: 1,
+    },
+    glowIntensity: {
+        type: ControlType.Number,
+        title: "Glow Intensity",
+        defaultValue: 100,
+        min: 0,
+        max: 200,
+        step: 5,
+    },
+    panelWidth: {
+        type: ControlType.Number,
+        title: "Panel Width",
+        defaultValue: 210,
+        min: 120,
+        max: 350,
+        step: 5,
+    },
+    videoExtendW: {
+        type: ControlType.Number,
+        title: "Vid Extend W",
+        defaultValue: 0,
+        min: 0,
+        max: 400,
+        step: 10,
+    },
+    videoExtendH: {
+        type: ControlType.Number,
+        title: "Vid Extend H",
+        defaultValue: 0,
+        min: 0,
+        max: 400,
+        step: 10,
+    },
+    swayIntensity: {
+        type: ControlType.Number,
+        title: "Sway",
+        defaultValue: 6,
+        min: 0,
+        max: 30,
+        step: 1,
+    },
+    panelExtendH: {
+        type: ControlType.Number,
+        title: "Panel Extend H",
+        defaultValue: 60,
+        min: -100,
+        max: 300,
+        step: 5,
+    },
+    bgVideoOpacity: {
+        type: ControlType.Number,
+        title: "BG Vid Opacity",
+        defaultValue: 50,
+        min: 0,
+        max: 100,
+        step: 5,
+    },
+    bgVideoScale: {
+        type: ControlType.Number,
+        title: "BG Vid Scale",
+        defaultValue: 100,
+        min: 50,
+        max: 300,
+        step: 5,
+    },
+    width: {
+        type: ControlType.Number,
+        title: "Width",
+        defaultValue: 1200,
+        min: 600,
+        max: 1800,
+    },
+    height: {
+        type: ControlType.Number,
+        title: "Height",
+        defaultValue: 640,
+        min: 400,
+        max: 1000,
+    },
+})
+---
+
+## 11. AUDIO SYSTEM
+
+### 11.1 — Audio Architecture
+
+```cpp
+// Source/PastaWarfare/Audio/PastaAudioManager.h
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Subsystems/WorldSubsystem.h"
+#include "PastaAudioManager.generated.h"
+
+UENUM(BlueprintType)
+enum class EMusicState : uint8
+{
+    MainMenu,
+    Lobby,
+    BusFlight,
+    EarlyGame,      // Calm ambient
+    MidGame,        // Building tension
+    LateGame,       // Intense combat music
+    FinalCircle,    // Maximum intensity
+    Victory,
+    Elimination     // Death sting
+};
+
+UCLASS()
+class PASTAWARFARE_API UPastaAudioManager : public UWorldSubsystem
+{
+    GENERATED_BODY()
+
+public:
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void SetMusicState(EMusicState NewState);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void PlayStinger(const FString& StingerName);
+
+    UFUNCTION(BlueprintCallable, Category = "Audio")
+    void SetAmbientBiome(const FString& BiomeType);
+
+protected:
+    UPROPERTY(EditDefaultsOnly, Category = "Audio|Music")
+    TMap<EMusicState, USoundBase*> MusicTracks;
+
+    UPROPERTY(EditDefaultsOnly, Category = "Audio|Stingers")
+    TMap<FString, USoundBase*> Stingers;
+
+    UPROPERTY()
+    UAudioComponent* MusicComponent;
+
+    UPROPERTY()
+    UAudioComponent* AmbientComponent;
+
+    float CurrentMusicIntensity;
+    EMusicState CurrentState;
+};
+```
+
+### 11.2 — Sound Design Specifications
+
+```
+AUDIO DESIGN DOCUMENT:
+
+=== WEAPON SOUNDS ===
+All weapon sounds must incorporate pasta-related foley:
+
+Penne Puncher (Assault Rifle):
+  Fire: Crisp snap + hollow thunk (penne tube popping) + mechanical cycling
+  Reload: Clinking of penne tubes sliding into magazine + snap click
+  Impact: Ceramic/pasta cracking on surface
+
+Farfalle Flinger (Shotgun):
+  Fire: Deep boom + flutter of pasta wings + scattered impact
+  Reload: Sliding shell sound + pasta shuffle
+  Pump: Wet pasta squish + mechanical rack
+
+Linguine Longshot (Sniper):
+  Fire: Sharp whip crack (linguine cutting air) + reverb tail
+  Bolt action: Sliding flat noodle sound
+  Bullet flyby: High-pitched whistle + noodle flutter
+
+Lasagna Launcher (RPG):
+  Fire: Heavy wet THWUMP + sizzle of hot cheese
+  Projectile flight: Whistling + bubbling sauce sound
+  Explosion: Splat + boom + cheese sizzle decay
+
+Spaghetti Whip (Melee):
+  Swing: Wet noodle whip crack
+  Hit: Slap + squelch
+  Miss: Whoosh with noodle flutter
+
+=== CHARACTER SOUNDS ===
+Per-pasta type footsteps and movement:
+
+Spaghetti: Wet squish + light noodle rustle
+Penne: Hollow clicking/clacking (like bamboo)
+Farfalle: Light fluttery rustle
+Rigatoni: Heavy hollow thuds (deep resonance)
+Fusilli: Springy spiral bounce sounds
+Lasagna: Wet layered squelch + heavy step
+Ravioli: Soft puffy pillow sounds
+Macaroni: Curved tube clinking
+Linguine: Flat ribbon slap sounds
+Tortellini: Round rolling sounds
+Orzo: Cascading tiny grain sounds (like sand/rice)
+
+=== AMBIENT BIOME SOUNDS ===
+Desert (Iraq/Syria/Yemen/Sudan):
+  - Wind through ruins, distant muezzin call, sand granules
+  - Occasional helicopter/vehicle in distance
+  - Crackling fires, settling rubble
+
+Temperate (Ukraine):
+  - Wind through trees, distant birds, river flow
+  - Occasional distant artillery (non-directional ambient)
+  - Creaking structures, wind howl
+
+Tropical (Myanmar/Somalia):
+  - Insects, tropical birds, waves (coastal)
+  - Dense vegetation rustle, rain drips
+  - Distant city sounds
+
+Highland (Ethiopia):
+  - Mountain wind, sparse bird calls
+  - Distant village sounds, livestock
+  - Echo effects from valleys
+
+=== MUSIC SYSTEM ===
+Adaptive music using horizontal layering (Wwise-style in UE5):
+
+Base Layer: Always playing ambient pad per biome
+Rhythm Layer: Fades in during mid-game, percussion based on region
+  - Middle East zones: Frame drum / darbuka patterns
+  - Eastern European: Martial snare patterns
+  - African: Djembe and talking drum
+  - Asian: Taiko-influenced patterns
+Melody Layer: Fades in during late game, Italian-inspired motifs
+  - Accordion/mandolin melodic fragments
+  - Operatic vocal stabs for elimination streaks
+Intensity Layer: Swells during final circle
+  - Full orchestral surge
+  - Choir stabs on eliminations
+
+Victory Music: Triumphant Italian-themed orchestral piece
+  - Mandolins, accordion, strings, brass
+  - "That's-a spicy meatball!" voice line at match win
+
+=== UI SOUNDS ===
+Menu navigation: Soft pasta snap clicks
+Button hover: Light noodle squish
+Button press: Satisfying pasta crunch
+Match found: Italian kitchen bell + sizzle
+Elimination popup: Quick orchestral hit + pasta snap
+Supply drop incoming: Descending whistle + pot lid clang
+Storm warning: Deep rumbling + boiling water sounds
+Chest opening: Creaking + pasta tumbling out
+```
+
+### 11.3 — AI Audio Generation
+
+```python
+# Scripts/AssetGen/audio_generator.py
+"""
+Generate placeholder audio using AI audio generation APIs.
+Final audio should be produced by a sound designer, but this provides
+functional placeholders for development.
+
+Options:
+  - Stability Audio API (stability.ai)
+  - ElevenLabs SFX generation
+  - Freesound API for Creative Commons samples
+"""
+
+import requests
+import os
+
+ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY")
+
+def generate_sfx_elevenlabs(prompt: str, output_path: str, 
+                             duration_seconds: float = 2.0) -> str:
+    """Generate sound effect using ElevenLabs Sound Effects API."""
+    headers = {
+        "xi-api-key": ELEVENLABS_API_KEY,
+        "Content-Type": "application/json"
+    }
+    
+    payload = {
+        "text": prompt,
+        "duration_seconds": duration_seconds,
+        "prompt_influence": 0.5
+    }
+    
+    response = requests.post(
+        "https://api.elevenlabs.io/v1/sound-generation",
+        headers=headers,
+        json=payload
+    )
+    
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    with open(output_path, 'wb') as f:
+        f.write(response.content)
+    
+    return output_path
+
+# Generate all game sound effects
+SOUND_EFFECTS = {
+    # Weapon fire sounds
+    "SFX_Penne_Puncher_Fire": ("Rapid hollow tube popping sound, crisp mechanical, assault rifle pasta weapon fire, game sound effect", 0.3),
+    "SFX_Farfalle_Flinger_Fire": ("Deep boom with fluttering, shotgun blast with pasta scatter, game sound effect", 0.4),
+    "SFX_Linguine_Longshot_Fire": ("Sharp whip crack with reverb, high velocity snap, sniper rifle shot, game sound", 0.5),
+    "SFX_Lasagna_Launcher_Fire": ("Heavy wet thump with sizzle, rocket launcher fire, game sound effect", 0.6),
+    "SFX_Orzo_Obliterator_Fire": ("Rapid tiny pellet spray, cascading grain fire, SMG burst, game sound", 0.2),
+    "SFX_Fusilli_Fury_Fire": ("Double barrel boom with spiral whoosh, heavy shotgun, game sound", 0.5),
+    "SFX_Spaghetti_Whip_Swing": ("Wet noodle whip crack, melee swing, game sound effect", 0.4),
+    
+    # Impact sounds
+    "SFX_Pasta_Impact_Light": ("Ceramic cracking, light pasta breaking on surface, game impact sound", 0.3),
+    "SFX_Pasta_Impact_Heavy": ("Heavy pasta shattering, explosive splat, game impact sound", 0.5),
+    "SFX_Sauce_Splat": ("Wet sauce splatter on surface, tomato sauce impact, game sound", 0.3),
+    "SFX_Cheese_Sizzle": ("Hot melted cheese sizzling and bubbling, game ambient sound", 1.5),
+    
+    # Explosion sounds
+    "SFX_Meatball_Explosion": ("Meaty explosion with bread crumb scatter, grenade explosion, game sound", 0.8),
+    "SFX_Marinara_Molotov": ("Glass breaking with wet sauce splash and fire ignition, game sound", 0.6),
+    "SFX_Lasagna_Explosion": ("Heavy layered explosion with cheese splatter, rocket impact, game sound", 1.0),
+    
+    # Character sounds
+    "SFX_Footstep_Spaghetti": ("Wet squishing footstep, noodle step on ground, game footstep sound", 0.2),
+    "SFX_Footstep_Penne": ("Hollow tube clicking footstep, hard pasta on ground, game footstep", 0.2),
+    "SFX_Footstep_Rigatoni": ("Heavy hollow thud footstep, large tube step, game footstep sound", 0.2),
+    
+    # Ability sounds
+    "SFX_Noodle_Lasso_Throw": ("Wet rope throwing sound with whoosh, lasso toss, game ability sound", 0.5),
+    "SFX_Noodle_Lasso_Hit": ("Wet grab and tighten, rope catching, game ability impact", 0.3),
+    "SFX_Spiral_Dash": ("Spinning whoosh with springy coil sound, movement ability, game sound", 0.4),
+    "SFX_Layer_Up_Shield": ("Layered stacking sound, building up, shield ability, game sound", 0.6),
+    
+    # UI sounds
+    "SFX_UI_Click": ("Crisp pasta snap, clean UI click, game interface sound", 0.1),
+    "SFX_UI_Hover": ("Light soft pasta squish, subtle UI hover, game interface sound", 0.1),
+    "SFX_UI_Confirm": ("Satisfying pasta crunch, confirmation, game interface sound", 0.2),
+    "SFX_Chest_Open": ("Creaky wooden box opening with pasta tumbling, loot chest, game sound", 1.0),
+    "SFX_Pickup_Item": ("Quick swoosh with subtle chime, item pickup, game sound", 0.3),
+    "SFX_Elimination_Sting": ("Quick dramatic orchestral hit, elimination notification, game sound", 0.5),
+    "SFX_Victory_Fanfare": ("Triumphant Italian fanfare with mandolin and accordion, victory music, game sound", 3.0),
+    
+    # Ambient sounds
+    "SFX_Boiling_Water": ("Pot of water boiling and bubbling, kitchen ambient, game ambient sound", 5.0),
+    "SFX_Storm_Rumble": ("Deep rumbling with boiling water undertone, storm ambient, game sound", 5.0),
+    "SFX_Bus_Engine": ("Fantastical flying engine hum with bubbling pot sounds, vehicle, game sound", 5.0),
+}
+
+def generate_all_sounds():
+    """Generate all game sound effects."""
+    for name, (prompt, duration) in SOUND_EFFECTS.items():
+        output_path = f"Content/Audio/SFX/{name}.wav"
+        try:
+            generate_sfx_elevenlabs(prompt, output_path, duration)
+            print(f"  ✓ Generated: {name}")
+        except Exception as e:
+            print(f"  ⚠ Failed: {name} — {e}")
+
+if __name__ == "__main__":
+    generate_all_sounds()
+```
+
+---
+
+## 12. VFX & SHADER SYSTEMS
+
+### 12.1 — Niagara VFX Systems Required
+
+```
+NIAGARA VFX LIST:
+
+=== WEAPON VFX ===
+NS_MuzzleFlash_Pasta:
+  - Burst of tiny pasta fragments + steam puff
+  - Parametric: color tint per weapon type
+  - Life: 0.1s, 20-30 particles
+
+NS_Tracer_PenneTube:
+  - Spinning penne tube flying through air
+  - Ribbon trail behind it
+  - GPU particles for performance
+
+NS_Tracer_SpaghettiNeedle:
+  - Thin fast line with slight wave
+  - Hair-thin ribbon trail
+
+NS_Tracer_FarfalleSpread:
+  - Multiple farfalle shapes spreading outward
+  - Flutter animation on each particle (mesh particles)
+
+NS_Impact_PastaBreak:
+  - Pasta fragments scattering on impact
+  - Dust cloud + small sparks
+  - Decal spawn (pasta splat)
+  - Parametric: surface type response
+
+NS_Explosion_Meatball:
+  - Spherical shockwave ring
+  - Meat and breadcrumb particle scatter
+  - Smoke column (brown-red)
+  - Ground scorch decal
+  - Camera shake trigger
+
+NS_Explosion_Lasagna:
+  - Layered rectangular explosion
+  - Cheese string particles stretching and falling
+  - Sauce splatter spray
+  - Larger smoke plume
+
+NS_Fire_Marinara:
+  - Red-orange fire effect
+  - Sauce bubbling on ground
+  - Steam rising
+  - Area-of-effect visualization ring
+
+NS_Smoke_Parmesan:
+  - Dense yellow-white smoke cloud
+  - Cheese particle motes floating
+  - Volumetric density over time
+
+NS_Slip_Alfredo:
+  - Creamy white liquid spreading on ground
+  - Glossy reflective surface decal
+  - Small bubble particles
+
+=== CHARACTER VFX ===
+NS_Spaghetti_IdleStrands:
+  - Gentle sway of loose noodle strands
+  - Spline-based hair simulation particles
+  - Responds to movement direction
+
+NS_Sauce_Drip:
+  - Occasional sauce drip from characters
+  - Parametric: sauce color (red/white/green)
+  - Ground splat on landing
+
+NS_Orzo_BodyShimmer:
+  - Constant tiny grain movement on Orzo character
+  - Grain particles separating and rejoining
+  - Parametric: intensity based on movement speed
+
+NS_Elimination_PastaExplosion:
+  - Per-character-type elimination burst
+  - Spaghetti: noodles flying everywhere
+  - Penne: tubes scattering
+  - Farfalle: butterflies dispersing
+  - Etc. — each pasta type has unique death particles
+
+NS_HealEffect_Steam:
+  - Rising steam particles when consuming healables
+  - Green tint for health, blue for shield
+  - Gentle upward spiral
+
+NS_BuildPlace_Flour:
+  - Flour dust poof when placing building
+  - Brief white particle burst
+  - Settling dust
+
+=== ENVIRONMENT VFX ===
+NS_Storm_Wall:
+  - Massive vertical wall of boiling pasta water
+  - Rolling cloud with lightning
+  - Steam at the base
+  - Translucent from distance, opaque up close
+  - Damage indicator (red pulse when inside)
+  - GPU heavy — use LOD system:
+    - Close: Full particle simulation
+    - Medium: Simplified billboard particles
+    - Far: Shader-only (no particles)
+
+NS_SupplyDrop_Trail:
+  - Steam trail from descending pasta pot supply drop
+  - Spiral descent animation
+  - Glow effect on pot
+
+NS_Chest_Glow:
+  - Subtle glow emanating from chests
+  - Rarity-colored particles:
+    - Common: gray motes
+    - Uncommon: green sparkles
+    - Rare: blue sparkles
+    - Epic: purple swirl
+    - Legendary: gold beam + particle shower
+
+NS_HeatmapGlow:
+  - Emissive glow on terrain matching heatmap intensity
+  - Pulsing ember particles in high-conflict areas
+  - Smoke wisps rising from intense zones
+```
+
+### 12.2 — Custom Shaders & Materials
+
+```
+SHADER SYSTEMS:
+
+=== M_Storm_Wall (Material) ===
+Custom translucent material for storm wall:
+- Scrolling noise texture for turbulence
+- Fresnel for edge glow
+- Depth fade for ground intersection
+- Refraction for distortion
+- Color: murky brownish water with red lightning flashes
+- Opacity: distance-based (more opaque closer)
+- Emissive: pulsing to indicate damage zone
+
+=== M_Heatmap_Overlay (Material) ===
+Applied to terrain as decal or landscape layer:
+- Samples dynamic heatmap texture from ConflictHeatmapSubsystem
+- Color ramp: transparent → blue → green → yellow → orange → red
+- Emissive intensity scales with conflict intensity
+- Animated noise for organic look
+- Additive blend over terrain
+
+=== M_Ghost_Build (Material) ===
+For building placement preview:
+- Translucent with grid pattern
+- Color parameter: green (valid) / red (invalid)
+- Edge highlight (fresnel)
+- Pulse animation
+
+=== M_Shield_Hit (Material) ===
+Shield impact visualization:
+- Hexagonal grid pattern
+- Ripple from impact point
+- Blue-white glow fading over 0.3s
+- Fresnel for sphere shape
+
+=== M_Rarity_Glow (Material Function) ===
+Reusable glow for items by rarity:
+- Parameter: rarity enum → color mapping
+- Pulsing emissive
+- Particle spawn trigger
+
+=== PP_DamageVignette (Post Process) ===
+Screen-space damage indication:
+- Red vignette at low health
+- Directional damage indicator overlay
+- Screen shake integration
+- Desaturation at critical health
+
+=== PP_StormDamage (Post Process) ===
+Screen effect when inside storm:
+- Edge distortion
+- Color shift to brownish
+- Particle overlay (water droplets)
+- Intensity scales with storm damage
+```
+
+---
+
+## 13. OPTIMIZATION & STREAMING
+
+### 13.1 — Performance Targets
+
+```
+TARGET PERFORMANCE:
+
+Platform         | Resolution | FPS Target | Quality
+─────────────────┼────────────┼────────────┼─────────
+PC High-end      | 4K         | 60 FPS     | Epic
+PC Mid-range     | 1440p      | 60 FPS     | High
+PC Low-end       | 1080p      | 60 FPS     | Medium
+PS5              | 4K (upscaled) | 60 FPS  | High
+Xbox Series X    | 4K (upscaled) | 60 FPS  | High
+Xbox Series S    | 1080p      | 60 FPS     | Medium
+```
+
+### 13.2 — World Partition Strategy
+
+```cpp
+// Source/PastaWarfare/World/PastaWorldPartitionSubsystem.h
+
+/*
+WORLD PARTITION CONFIGURATION:
+
+The game map uses UE5's World Partition system with custom streaming logic:
+
+GRID SIZE: 256m × 256m cells (each cell is a streaming unit)
+
+STREAMING DISTANCES:
+  - Character detail:  500m (full LOD0 within this range)
+  - Building detail:   800m (structures fully loaded)
+  - Terrain detail:    1500m (full landscape resolution)
+  - Vegetation:        600m (foliage instances)
+  - Far terrain:       5000m (low-LOD terrain, Nanite simplified)
+  - Globe backdrop:    Infinite (always loaded during drop)
+
+PRIORITY LOADING:
+  1. Cell containing player (immediate)
+  2. Cells in movement direction (predictive)
+  3. Adjacent cells (ring buffer)
+  4. Cells near other players in view (network-informed)
+  5. Background cells (low priority)
+
+NANITE USAGE:
+  - ALL static meshes use Nanite (buildings, rocks, props, terrain)
+  - Characters do NOT use Nanite (need skeletal mesh)
+  - Weapons do NOT use Nanite (attached to characters)
+  - Building pieces: Nanite enabled for placed pieces, disabled for ghost preview
+
+HLOD (Hierarchical Level of Detail):
+  - Generated automatically for each World Partition cell
+  - HLOD0: Full detail (within streaming distance)
+  - HLOD1: Merged simplified meshes (500m-1500m)
+  - HLOD2: Billboard impostors (1500m-5000m)
+  - HLOD3: Color-averaged blocks (5000m+, visible during drop)
+
+VIRTUAL TEXTURING:
+  - Landscape uses Runtime Virtual Texturing (RVT)
+  - Virtual texture pool: 4GB
+  - Tile size: 256×256 (streaming unit)
+  - Feedback buffer: half resolution
+
+DATA LAYERS:
+  - Layer_Terrain: Heightmaps, splatmaps, landscape actors
+  - Layer_Buildings: Procedurally placed structures
+  - Layer_Vegetation: Foliage instances, trees
+  - Layer_Loot: Spawn points, chests, floor loot
+  - Layer_Gameplay: Triggers, zones, spawn points
+  - Layer_VFX: Ambient effects, heatmap decals
+*/
+```
+
+### 13.3 — Memory & Draw Call Budget
+
+```
+MEMORY BUDGET (8GB GPU target):
+
+Category              | Budget   | Notes
+──────────────────────┼──────────┼──────────────────────
+Terrain textures      | 1.5 GB   | Virtual texturing pool
+Building meshes       | 1.0 GB   | Nanite mesh data
+Character meshes      | 0.5 GB   | 11 types × ~45MB each
+Weapon meshes         | 0.3 GB   | ~20 weapons × ~15MB
+VFX textures          | 0.3 GB   | Particle sprites, flipbooks
+UI textures           | 0.2 GB   | Atlas sheets
+Animation data        | 0.4 GB   | Compressed sequences
+Audio                 | 0.3 GB   | Compressed, streaming
+Render targets        | 1.5 GB   | GBuffer, shadows, etc.
+Overhead/system       | 2.0 GB   | Engine, shaders, buffers
+──────────────────────┼──────────┼──────────────────────
+TOTAL                 | 8.0 GB   |
+
+DRAW CALL BUDGET:
+- Target: <3000 draw calls per frame
+- Characters visible: ~20 at any time (LOD system)
+- Buildings in view: ~200 (Nanite handles this)
+- Vegetation: Instanced (1 draw call per foliage type)
+- Particles: GPU Niagara (minimal CPU draw calls)
+- UI: Batched Slate rendering
+
+TRIANGLE BUDGET:
+- Nanite handles geometric complexity automatically
+- Proxy triangle budget: ~5M triangles visible
+- Nanite will render from billions of source triangles
+```
+
+### 13.4 — Network Optimization
+
+```
+NETWORK OPTIMIZATION:
+
+Replication Frequency Tiers:
+  Critical (every net tick, 60Hz):
+    - Own pawn position/rotation
+    - Fire/hit events
+  
+  High (30Hz):
+    - Nearby enemy positions (within 100m)
+    - Active ability effects nearby
+  
+  Medium (10Hz):
+    - Distant player positions (100m-500m)
+    - Health/shield changes
+    - Inventory updates
+  
+  Low (2Hz):
+    - Players beyond 500m (position only)
+    - Storm circle updates
+    - Score updates
+  
+  Event-Only:
+    - Eliminations
+    - Building placement (once, then static)
+    - Loot pickups
+
+Compression:
+  - Positions: FVector_NetQuantize10 (1mm precision, saves 50% bandwidth)
+  - Rotations: FRotator compressed to 16-bit per component
+  - Velocities: Quantized to 1cm/s precision
+  - Health/Shield: uint8 (0-200 range is sufficient)
+
+Relevancy:
+  - Players beyond 500m: position-only updates
+  - Players beyond 1000m: not replicated (use minimap dots only)
+  - Building pieces: relevant only within 300m
+  - Loot items: relevant only within 200m
+  - VFX actors: not replicated (spawned client-side from RPC)
+
+Bandwidth Target:
+  - Server upstream: 5 MB/s total (100 players)
+  - Per-player downstream: 50 KB/s average, 150 KB/s peak
+  - Per-player upstream: 10 KB/s average
+```
+
+---
+
+## 14. BACKEND SERVICES
+
+### 14.1 — Backend Architecture
+
+```
+BACKEND SERVICES ARCHITECTURE:
+
+┌─────────────────────────────────────────────────────────┐
+│                    GAME CLIENT                           │
+└──────────────┬──────────────────────────┬───────────────┘
+               │                          │
+    ┌──────────▼──────────┐    ┌──────────▼──────────┐
+    │   MATCHMAKING       │    │   ACCOUNT SERVICE   │
+    │   (EOS / Custom)    │    │   (REST API)        │
+    │   - Region routing  │    │   - Auth (OAuth2)   │
+    │   - Skill-based     │    │   - Profile         │
+    │   - Squad formation │    │   - Inventory       │
+    └──────────┬──────────┘    │   - Purchases       │
+               │               │   - Stats           │
+    ┌──────────▼──────────┐    └──────────┬──────────┘
+    │   GAME SERVER       │               │
+    │   (Dedicated UE5)   │    ┌──────────▼──────────┐
+    │   - 100 player      │    │   DATABASE          │
+    │   - Server authority│    │   (PostgreSQL)      │
+    │   - Match state     │    │   - Player accounts │
+    │   - Anti-cheat      │    │   - Match history   │
+    └──────────┬──────────┘    │   - Leaderboards    │
+               │               │   - Inventory       │
+    ┌──────────▼──────────┐    └─────────────────────┘
+    │   GAME SERVER       │
+    │   FLEET MANAGER     │    ┌─────────────────────┐
+    │   (Agones / Gamelift│    │  CONFLICT DATA      │
+    │    / Custom K8s)    │    │  SERVICE            │
+    │   - Auto-scaling    │    │  - ACLED API proxy  │
+    │   - Region deploy   │    │  - UCDP API proxy   │
+    │   - Health checks   │    │  - Cache layer      │
+    └─────────────────────┘    │  - Heatmap compute  │
+                               └─────────────────────┘
+
+TECHNOLOGY CHOICES:
+  - Matchmaking: Epic Online Services (EOS) — free, cross-platform
+  - Account/Profile: Custom REST API (Node.js + Express or Go)
+  - Database: PostgreSQL (accounts, stats) + Redis (leaderboards, cache)
+  - Game Servers: UE5 Dedicated Server on AWS/GCP
+  - Fleet Management: Agones (Kubernetes-based) or AWS GameLift
+  - Conflict Data: Custom microservice caching ACLED/UCDP data
+  - CDN: CloudFront/Fastly for patches and assets
+  - Voice Chat: EOS Voice or Vivox integration
+```
+
+### 14.2 — Matchmaking Flow
+
+```
+MATCHMAKING SEQUENCE:
+
+1. CLIENT → MATCHMAKER: RequestMatch(region, mode, squad_members)
+2. MATCHMAKER: Check player pool for region
+   - If pool >= MinPlayers (50): Create match
+   - If pool < MinPlayers: Wait up to 30s, then fill with bots
+3. MATCHMAKER → FLEET MANAGER: RequestServer(region, map_config)
+4. FLEET MANAGER: Spin up or allocate existing server
+5. FLEET MANAGER → MATCHMAKER: ServerReady(ip, port, encryption_key)
+6. MATCHMAKER → CLIENT: MatchFound(server_ip, port, token)
+7. CLIENT: Connect to dedicated server with auth token
+8. SERVER: Validate token, spawn player in lobby
+
+REGIONS:
+  - NA-East (Virginia)
+  - NA-West (Oregon)
+  - EU-West (London/Frankfurt)
+  - EU-East (Warsaw)
+  - ME (Bahrain)  — Important for Iraq/Yemen/Syria zones
+  - Asia (Singapore/Tokyo)
+  - OCE (Sydney)
+  - SA (São Paulo)
+  - Africa (Cape Town)
+
+Bot backfill fills remaining slots with AI players.
+Bots use Behavior Trees with difficulty scaling based on remaining human player skill.
+```
+
+### 14.3 — Account & Progression System
+
+```
+PLAYER PROGRESSION:
+
+Account Level: 1-1000 (XP from matches)
+  XP Sources:
+    - Eliminations: 50 XP each
+    - Assists: 25 XP
+    - Top 25: 100 XP
+    - Top 10: 200 XP  
+    - Top 5: 350 XP
+    - Victory Royale: 500 XP
+    - Damage dealt: 1 XP per 10 damage
+    - Materials harvested: 1 XP per 50 mats
+    - Survival time: 1 XP per 30 seconds
+    - First game of the day: 200 XP bonus
+
+Pasta Pass (Battle Pass equivalent):
+  - 100 tiers per season (10 weeks)
+  - Free track: Basic cosmetics every 5 tiers
+  - Premium track ($9.99): Cosmetic every tier
+  - Rewards include: skins, gliders, harvesting tools, emotes, 
+    loading screens, sprays, Penne Points
+
+Challenges (Daily/Weekly):
+  - Daily (3 per day, reset at midnight UTC):
+    - "Eliminate 3 players with shotguns"
+    - "Deal 500 damage with abilities"
+    - "Harvest 1000 materials"
+  - Weekly (7 per week):
+    - "Win a match in Iraq zone"
+    - "Eliminate a player with every weapon type"
+    - "Place 100 building pieces in a single match"
+  - Season-long:
+    - "Win 50 matches"
+    - "Play as each pasta type at least once"
+    - "Visit all conflict zones"
+
+Leaderboards:
+  - Global rankings by: Wins, K/D, Win Rate
+  - Per-zone rankings (top players in each conflict zone)
+  - Per-pasta-type rankings
+  - Seasonal and all-time
+```
+
+---
+
+## 15. BUILD, PACKAGE & RELEASE
+
+### 15.1 — Build Pipeline
+
+```bash
+#!/bin/bash
+# Scripts/Build/build_all.sh
+# Complete build pipeline for all platforms
+
+set -e
+
+PROJECT_DIR="/path/to/PastaWarfare"
+UE_DIR="/path/to/UnrealEngine"
+BUILD_DIR="/builds"
+
+# === STEP 1: Cook Content ===
+echo "=== Cooking Content ==="
+"${UE_DIR}/Engine/Build/BatchFiles/RunUAT.sh" BuildCookRun \
+    -project="${PROJECT_DIR}/PastaWarfare.uproject" \
+    -noP4 \
+    -platform=Win64 \
+    -clientconfig=Shipping \
+    -serverconfig=Shipping \
+    -cook \
+    -build \
+    -stage \
+    -pak \
+    -archive \
+    -archivedirectory="${BUILD_DIR}/Win64" \
+    -compressed \
+    -prereqs \
+    -distribution \
+    -createreleaseversion=1.0.0 \
+    -nodebuginfo
+
+# === STEP 2: Build Dedicated Server ===
+echo "=== Building Dedicated Server (Linux) ==="
+"${UE_DIR}/Engine/Build/BatchFiles/RunUAT.sh" BuildCookRun \
+    -project="${PROJECT_DIR}/PastaWarfare.uproject" \
+    -noP4 \
+    -platform=Linux \
+    -server \
+    -serverconfig=Shipping \
+    -cook \
+    -build \
+    -stage \
+    -pak \
+    -archive \
+    -archivedirectory="${BUILD_DIR}/LinuxServer" \
+    -compressed \
+    -nodebuginfo \
+    -noclient
+
+# === STEP 3: Package for Distribution ===
+echo "=== Packaging ==="
+
+# Create installer (NSIS or Inno Setup for Windows)
+# Or prepare for Steam/Epic distribution
+
+# === STEP 4: Docker Container for Server ===
+echo "=== Building Server Docker Image ==="
+cat > "${BUILD_DIR}/Dockerfile.server" << 'DOCKERFILE'
+FROM ubuntu:22.04
+
+RUN apt-get update && apt-get install -y \
+    libfontconfig1 \
+    libfreetype6 \
+    libc6 \
+    libstdc++6 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /server
+
+COPY LinuxServer/ .
+
+RUN chmod +x PastaWarfareServer
+
+EXPOSE 7777/udp
+EXPOSE 27015/udp
+
+ENTRYPOINT ["./PastaWarfareServer", "-log", "-port=7777"]
+DOCKERFILE
+
+cd "${BUILD_DIR}"
+docker build -f Dockerfile.server -t pastawarfare-server:latest .
+
+# === STEP 5: Push Server Image ===
+echo "=== Pushing Server Image ==="
+# docker push to ECR/GCR for fleet management
+
+echo "=== BUILD COMPLETE ==="
+echo "Client build:
